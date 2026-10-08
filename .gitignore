@@ -1,0 +1,5 @@
+.env
+node_modules/
+.ipynb_checkpoints/
+# Local Claude Code preview config (machine-specific paths)
+.claude/

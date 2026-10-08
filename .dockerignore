@@ -1,0 +1,8 @@
+node_modules
+deploy/node_modules
+.claude
+.env
+.env.*
+deploy/.env*
+deploy/.vercel
+deploy/.deploy-url

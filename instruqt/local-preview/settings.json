@@ -1,0 +1,26 @@
+{
+  "workbench.colorTheme": "Dark 2026",
+  "workbench.startupEditor": "none",
+  "window.restoreWindows": "none",
+  "window.menuBarVisibility": "classic",
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "workbench.statusBar.visible": false,
+  "explorer.autoReveal": false,
+  "editor.minimap.enabled": false,
+  "editor.wordWrap": "on",
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000,
+  "security.workspace.trust.enabled": false,
+  "git.openRepositoryInParentFolders": "never",
+  "github.copilot.enable": false,
+  "chat.agent.enabled": false,
+  "chat.disableAIFeatures": true,
+  "mdb.presetConnections": [
+    { "name": "Local MongoDB Atlas", "connectionString": "mongodb://admin:mongodb@trailhead-atlas:27017/?directConnection=true" }
+  ],
+  "mdb.showOverviewPageAfterInstall": false,
+  "mdb.mcp.server": "autoStartDisabled",
+  "jupyter.kernels.excludePythonEnvironments": ["/bin/python3", "/usr/bin/python3", "/root/labs/.venv/bin/python"],
+  "jupyter.notebookFileRoot": "${fileDirname}",
+  "openOnce.files": ["./labs/vercel-mongodb-ai-memory-lab.ipynb"]
+}
