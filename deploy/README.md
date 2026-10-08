@@ -23,7 +23,7 @@ Without the CLI installed, prefix both with `npx vercel@63.0.1` (the version `de
 | Step | CLI command | Result |
 |---|---|---|
 | 1 | `vercel whoami` / `vercel login` | Checks that you're logged in |
-| 2 | `vercel link --yes --project trailhead-memory` | Creates or links the Vercel project |
+| 2 | `vercel link --yes --project trailhead-memory-<your-vercel-username>` | Creates or links your Vercel project (set `PROJECT=` to choose another name) |
 | 3 | `vercel integration add mongodbatlas --plan FREE -m clusterTier=FREE -m vercelRegion=iad1 -e production -e preview -e development` | Creates an Atlas account/org/project and an **M0 cluster**, connects it to the project, and injects **`MONGODB_URI`** |
 | 4 | `vercel deploy --prod --yes --regions iad1` | Deploys the function in the same region as the cluster |
 
@@ -85,6 +85,6 @@ Or point it at a local Atlas deployment: put `MONGODB_URI` and `AI_GATEWAY_API_K
 ## Cleanup
 
 ```bash
-vercel integration resource remove trailhead-memory-atlas   # deletes the Atlas resource
-vercel project remove trailhead-memory
+vercel integration resource remove trailhead-memory-<your-vercel-username>-atlas   # deletes the Atlas resource
+vercel project remove trailhead-memory-<your-vercel-username>
 ```

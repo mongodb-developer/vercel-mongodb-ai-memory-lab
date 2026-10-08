@@ -873,7 +873,7 @@ The next cell runs \`deploy/deploy.sh\`, which does:
 | # | Command | What happens |
 |---|---|---|
 | 1 | \`vercel whoami\` | Checks that you're logged in |
-| 2 | \`vercel link --yes --project trailhead-memory\` | Creates or links a Vercel project for \`deploy/\` |
+| 2 | \`vercel link --yes --project trailhead-memory-<your-vercel-username>\` | Creates or links *your* Vercel project for \`deploy/\` — one per person, so nobody deploys over anyone else |
 | 3 | \`vercel integration add mongodbatlas --plan FREE -m clusterTier=FREE -m vercelRegion=iad1\` | Creates a free **M0** cluster through the Vercel Marketplace and injects **\`MONGODB_URI\`** into the project |
 | 4 | \`vercel deploy --prod --yes\` | Builds and deploys the Next.js app in \`deploy/\` |
 
@@ -970,11 +970,12 @@ if (!DEPLOY_URL) {
   md(`
 ### 7.2 Tear it down
 
-The cluster is free, but if you want to remove everything, run this in a terminal from the \`deploy/\` folder:
+The cluster is free, but if you want to remove everything, run this in a terminal from the \`deploy/\` folder
+(the deploy cell printed your exact project name):
 
 \`\`\`bash
-vercel integration resource remove trailhead-memory-atlas --disconnect-all   # deletes the Atlas resource
-vercel project remove trailhead-memory
+vercel integration resource remove trailhead-memory-<your-vercel-username>-atlas --disconnect-all   # deletes the Atlas resource
+vercel project remove trailhead-memory-<your-vercel-username>
 \`\`\`
 
 🎉 **That's the lab.** You built a stateless agent, gave it five tiers of MongoDB memory, and shipped it to production.
