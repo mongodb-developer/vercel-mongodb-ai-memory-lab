@@ -1,6 +1,6 @@
 // Notebook cells for vercel-mongodb-ai-memory-lab.ipynb — edit here, then `deno task build`.
 //
-// Lab blanks: wrap the answer in /*▶*/ … /*◀*/ inside a code cell. The build strips the markers for
+// Lab blanks: wrap the answer in  …  inside a code cell. The build strips the markers for
 // solutions/ and replaces each marked span with <CODE_BLOCK_n> (numbered top to bottom) for labs/.
 // Keep blanks on MongoDB calls; leave AI SDK wiring filled in.
 export type Cell = { type: 'markdown' | 'code'; source: string }
@@ -85,7 +85,7 @@ const DB_NAME = 'trailhead_lab'
 const mongo = new MongoClient(MONGODB_URI, { appName: 'devrel-workshop-trailhead-memory' })
 const labDb = mongo.db(DB_NAME)
 // Check the connection: run the \`ping\` command against the \`admin\` database.
-await /*▶*/mongo.db('admin').command({ ping: 1 })/*◀*/
+await mongo.db('admin').command({ ping: 1 })
 
 console.log('✅ MongoDB reachable — chat:', CHAT_MODEL, '| embeddings:', EMBED_MODEL, '| db:', DB_NAME)
 `),
@@ -238,16 +238,19 @@ Search indexes get created now and we can look at them.
 `),
 
   code(`
-const mongodbMemory = createMongoDBMemory({
+// Create the memory instance. It needs three things: the connection string (\`uri\`), the \`embedder\`
+// defined in Part 1, and a \`topology\` whose \`dbName\` is DB_NAME so every tier lands in the lab database.
+const mongodbMemory = createMongoDBMemory(/*▶*/{
   uri: MONGODB_URI,
   embedder,
   topology: { dbName: DB_NAME },
-})
+}/*◀*/)
 
-await mongodbMemory.connect()
+// Bootstrap now — collections, TTL indexes and Vector Search indexes — instead of on the first tool call.
+/*▶*/await mongodbMemory.connect()/*◀*/
 
-// Calling the instance returns a tools record scoped to a user + session.
-const aliceTools = mongodbMemory({ userId: 'alice', sessionId: 'alice-s1' })
+// Calling the instance returns a tools record scoped to a user + session: user 'alice', session 'alice-s1'.
+const aliceTools = /*▶*/mongodbMemory({ userId: 'alice', sessionId: 'alice-s1' })/*◀*/
 console.log('tool keys:', Object.keys(aliceTools))
 console.log('\\n── tool description the LLM sees ──\\n' + aliceTools.memory.description)
 `),
@@ -258,23 +261,23 @@ small for the model and lets the package hide/disable commands per deployment.
 
 ### 2.2 Peek at what was created in Atlas
 
-\`connect()\` bootstrapped a whole schema. Use the driver to list it: the collections, their **TTL indexes**
+\`connect()\` bootstrapped a whole schema. Here's the driver listing it: the collections, their **TTL indexes**
 (regular indexes with \`expireAfterSeconds\`) and their **Atlas Vector Search indexes** (search indexes, listed separately).
 `),
 
   code(`
 async function describeDb() {
   // List every collection in \`labDb\` as an array.
-  const cols = (await /*▶*/labDb.listCollections().toArray()/*◀*/).map((c) => c.name).sort()
+  const cols = (await labDb.listCollections().toArray()).map((c) => c.name).sort()
   console.log('collections:', cols)
   for (const name of cols) {
     const col = labDb.collection(name)
     const count = await col.countDocuments()
     // Get the collection's indexes and keep only the TTL ones (they have an \`expireAfterSeconds\` field).
-    const ttl = /*▶*/(await col.indexes()).filter((i) => 'expireAfterSeconds' in i)/*◀*/.map((i) => \`\${Object.keys(i.key)[0]}(\${i.expireAfterSeconds}s)\`)
+    const ttl = (await col.indexes()).filter((i) => 'expireAfterSeconds' in i).map((i) => \`\${Object.keys(i.key)[0]}(\${i.expireAfterSeconds}s)\`)
     // List the collection's Atlas Search / Vector Search indexes as an array.
     // deno-lint-ignore no-explicit-any
-    const vec = (await /*▶*/col.listSearchIndexes().toArray()/*◀*/) as any[]
+    const vec = (await col.listSearchIndexes().toArray()) as any[]
     const vecInfo = vec.map((v) => \`\${v.name} [\${v.status}] dims=\${v.latestDefinition?.fields?.[0]?.numDimensions ?? '?'}\`)
     console.log(\`  \${name.padEnd(20)} docs=\${String(count).padEnd(3)} ttl=\${ttl.join(',').padEnd(40)} vector=\${vecInfo.join(', ') || '—'}\`)
   }
@@ -309,7 +312,8 @@ function buildTrailhead(userId: string, sessionId: string) {
   return new ToolLoopAgent({
     model: CHAT_MODEL,
     instructions: TRAILHEAD_INSTRUCTIONS + '\\n' + MEMORY_INSTRUCTIONS,
-    tools: { suggestTrail, ...mongodbMemory({ userId, sessionId }) },
+    // Memory is just more tools: spread the tools scoped to this userId + sessionId next to suggestTrail.
+    tools: { suggestTrail, /*▶*/...mongodbMemory({ userId, sessionId })/*◀*/ },
     stopWhen: isLoopFinished(),
   })
 }
@@ -339,7 +343,7 @@ Memory is *just tools*, and the database now has real documents. Let's look at o
 
   code(`
 // Find every document in the \`semantic_memory\` collection whose \`user_id\` is 'alice'.
-const semanticDocs = await /*▶*/labDb.collection('semantic_memory').find({ user_id: 'alice' }).toArray()/*◀*/
+const semanticDocs = await labDb.collection('semantic_memory').find({ user_id: 'alice' }).toArray()
 for (const d of semanticDocs) {
   console.log(\`• [\${d.name}] importance=\${d.importance} is_latest=\${d.is_latest} dims=\${d.embedding?.length}\`)
   console.log(\`    "\${d.description}"\`)
@@ -366,9 +370,9 @@ That answer came from **vector search**, not from a transcript: the new session 
 \`semantic_search\` query "knees" matched the stored fact. Try a paraphrase like *"any joint issues I mentioned?"* —
 it still lands because the match is on meaning, not keywords.
 
-### 2.6 Under the hood: run the vector search yourself
+### 2.6 Under the hood: the vector search behind \`semantic_search\`
 
-\`semantic_search\` is one MongoDB aggregation. Write it yourself: embed the question with the **same** Voyage model,
+\`semantic_search\` is one MongoDB aggregation. Here it is by hand: embed the question with the **same** Voyage model,
 then run a \`$vectorSearch\` stage against the \`semantic_vector_index\` the package created.
 
 The \`filter\` is what keeps memory private: it uses the \`user_id\` and \`is_latest\` filter fields declared in the index, so
@@ -382,17 +386,17 @@ const pipeline = [
   {
     // $vectorSearch over semantic_memory: index 'semantic_vector_index', vectors in the 'embedding' field,
     // 50 candidates, top 3 results, and only Alice's current facts (user_id 'alice', is_latest true).
-    $vectorSearch: /*▶*/{
+    $vectorSearch: {
       index: 'semantic_vector_index',
       path: 'embedding',
       queryVector,
       numCandidates: 50,
       limit: 3,
       filter: { user_id: { $eq: 'alice' }, is_latest: { $eq: true } },
-    }/*◀*/,
+    },
   },
   // Keep name and description, drop _id, and add the similarity score from the search metadata.
-  { $project: /*▶*/{ _id: 0, name: 1, description: 1, score: { $meta: 'vectorSearchScore' } }/*◀*/ },
+  { $project: { _id: 0, name: 1, description: 1, score: { $meta: 'vectorSearchScore' } } },
 ]
 
 for (const hit of await labDb.collection('semantic_memory').aggregate(pipeline).toArray()) {
@@ -412,7 +416,7 @@ Our instructions told the model to \`session_append\` every user and assistant t
 
   code(`
 // Find the turns of session 'alice-s1' (field \`session_id\`) in \`session_memory\`, oldest first (sort by \`seq\` ascending).
-const sessionTurns = await /*▶*/labDb.collection('session_memory').find({ session_id: 'alice-s1' }).sort({ seq: 1 })/*◀*/.toArray()
+const sessionTurns = await labDb.collection('session_memory').find({ session_id: 'alice-s1' }).sort({ seq: 1 }).toArray()
 console.log(\`alice-s1 has \${sessionTurns.length} stored turn(s) for 2 user prompts + 2 replies (expected 4):\`)
 for (const t of sessionTurns) console.log(\`  #\${t.seq} \${t.role.padEnd(9)} \${t.content.slice(0, 80)}\`)
 `),
@@ -448,7 +452,8 @@ Two details worth understanding:
 const mongodbMemoryB = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
-  topology: { dbName: DB_NAME, hideToolCommands: ['session'] },
+  // Same database, but hide the session commands from the LLM: the hooks below own the transcript now.
+  topology: /*▶*/{ dbName: DB_NAME, hideToolCommands: ['session'] }/*◀*/,
 })
 await mongodbMemoryB.connect()
 
@@ -471,17 +476,19 @@ const trailheadB = new ToolLoopAgent({
   // We drop the incoming prompt/messages because the AI SDK enforces prompt XOR messages.
   prepareCall: async ({ options, prompt: _p, messages: _m, ...settings }) => {
     const { userId, sessionId, prompt } = options
-    const history: ModelMessage[] = await mongodbMemoryB.loadSession({ userId, sessionId })
+    // Load this user + session's prior turns from MongoDB as ModelMessage[].
+    const history: ModelMessage[] = await /*▶*/mongodbMemoryB.loadSession({ userId, sessionId })/*◀*/
     return {
       ...settings,
       tools: { suggestTrail, ...mongodbMemoryB({ userId, sessionId }) },
       messages: [...history, { role: 'user', content: prompt }],
-      experimental_context: { userId, sessionId, prompt },
+      // Hand the scope (userId, sessionId, prompt) to onFinish, which only sees the finished generation.
+      /*▶*/experimental_context: { userId, sessionId, prompt },/*◀*/
     }
   },
 
-  // POST: write every turn exactly once.
-  onFinish: mongodbMemoryB.onFinish(),
+  // POST: write every turn exactly once — use the hook the memory instance provides.
+  onFinish: /*▶*/mongodbMemoryB.onFinish()/*◀*/,
   stopWhen: isLoopFinished(),
 })
 
@@ -510,8 +517,8 @@ command. Let's verify the transcript is complete and exactly-once:
   code(`
 // Count bob-s1's stored turns per role: $match on session_id 'bob-s1', then $group by $role with a $sum counter.
 const turnsByRole = await labDb.collection('session_memory').aggregate([
-  /*▶*/{ $match: { session_id: 'bob-s1' } },
-  { $group: { _id: '$role', turns: { $sum: 1 } } },/*◀*/
+  { $match: { session_id: 'bob-s1' } },
+  { $group: { _id: '$role', turns: { $sum: 1 } } },
 ]).toArray()
 console.log('bob-s1 turns by role:', Object.fromEntries(turnsByRole.map((r) => [r._id, r.turns])))
 
@@ -574,7 +581,7 @@ await chatB('alice', 'alice-s4', 'Which trails have I already done, and how did 
 
   code(`
 // Find Alice's episodes in \`episodic_memory\`, most important first (sort by \`importance\` descending).
-const episodes = await /*▶*/labDb.collection('episodic_memory').find({ user_id: 'alice' }).sort({ importance: -1 })/*◀*/.toArray()
+const episodes = await labDb.collection('episodic_memory').find({ user_id: 'alice' }).sort({ importance: -1 }).toArray()
 for (const e of episodes) console.log(\`• event_type=\${e.event_type} importance=\${e.importance} retrievals=\${e.stats?.retrieval_ct}\\n    "\${e.description}"\`, e.context ? JSON.stringify(e.context) : '')
 `),
 
@@ -598,7 +605,8 @@ const noteId = await store.scratchpadWrite('alice', 'alice-s4', 'Alice mentioned
 console.log('scratchpad note:', String(noteId))
 console.log('before promote:', (await store.scratchpadRead('alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
 
-const { episodicId } = await store.scratchpadPromote(String(noteId), 'alice', 'preference', { importance: 6 })
+// Promote the note into episodic memory for 'alice' with event type 'preference' and importance 6.
+const { episodicId } = await /*▶*/store.scratchpadPromote(String(noteId), 'alice', 'preference', { importance: 6 })/*◀*/
 console.log('promoted → episodic', String(episodicId))
 console.log('after promote: ', (await store.scratchpadRead('alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
 `),
@@ -619,7 +627,8 @@ await store.proceduralSave(
 🥾 Trail: <name> — <miles> mi, <elevation gain> ft, <difficulty>
 ✅ Why it fits: <one line tied to what you know about the user>
 ⏰ Go early: <one practical tip>\`,
-  { source: 'human_expert', importance: 9 },
+  // Options: mark it as written by a person (source 'human_expert') and give it importance 9.
+  /*▶*/{ source: 'human_expert', importance: 9 }/*◀*/,
 )
 
 const trailheadProc = buildTrailheadB('Before recommending any trail, call procedural_search with query "trip briefing format" and follow the procedure you find exactly.')
@@ -639,7 +648,7 @@ fact is updated in place. Watch the \`semantic_memory\` collection before and af
   code(`
 const showAliceFacts = async (label: string) => {
   // Find Alice's facts in \`semantic_memory\` in the order they were written (sort by \`timestamp\` ascending).
-  const docs = await /*▶*/labDb.collection('semantic_memory').find({ user_id: 'alice' }).sort({ timestamp: 1 })/*◀*/.toArray()
+  const docs = await labDb.collection('semantic_memory').find({ user_id: 'alice' }).sort({ timestamp: 1 }).toArray()
   console.log(\`\\n\${label} — \${docs.length} doc(s)\`)
   for (const d of docs) console.log(\`  [\${d.name}] latest=\${d.is_latest} imp=\${d.importance} "\${d.description.slice(0, 90)}"\`)
 }
@@ -665,10 +674,11 @@ await chatB('alice', 'alice-s7', "Please forget where I live — I'd rather not 
 // Models sometimes pick the wrong id to forget, so also forget one fact from code, where the id is certain.
 await store.semanticSave('alice', 'Alice gym', 'Alice has a gym membership at a Denver climbing gym.', { importance: 4 })
 const gymFact = await labDb.collection('semantic_memory').findOne({ user_id: 'alice', name: 'Alice gym', is_latest: true })
-await store.forget('semantic', String(gymFact!._id))
+// Forget that semantic memory by id with the store (the id is gymFact's _id, as a string).
+/*▶*/await store.forget('semantic', String(gymFact!._id))/*◀*/
 
 // Find Alice's facts that are scheduled for deletion: \`expire_at\` is set and already in the past ($lte now).
-const forgotten = await /*▶*/labDb.collection('semantic_memory').find({ user_id: 'alice', expire_at: { $lte: new Date() } })/*◀*/.toArray()
+const forgotten = await labDb.collection('semantic_memory').find({ user_id: 'alice', expire_at: { $lte: new Date() } }).toArray()
 console.log(\`\${forgotten.length} fact(s) waiting for the TTL monitor:\`)
 for (const d of forgotten) console.log(\`  [\${d.name}] expire_at=\${d.expire_at.toISOString()}  "\${d.description.slice(0, 70)}"\`)
 `),
@@ -724,7 +734,8 @@ const tunedMemory = createMongoDBMemory({
     session: { mode: 'ttl', ttlSeconds: 7 * 86_400 },   // keep transcripts a week instead of a day
   },
   filtering: {
-    minImportance: 4,          // never surface trivia in search results
+    // Never surface trivia: leave memories with importance below 4 out of search results.
+    /*▶*/minImportance: 4,/*◀*/
     numCandidatesMultiplier: 20, // better recall on $vectorSearch at slight cost
   },
   defaults: { searchLimit: 3 },

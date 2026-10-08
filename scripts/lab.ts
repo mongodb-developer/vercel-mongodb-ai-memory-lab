@@ -102,15 +102,18 @@ const trailheadOtherModel = new ToolLoopAgent({
 await chat(trailheadOtherModel, 'Can you suggest a trail for me this weekend?')
 
 // ══════════ cell 7 ══════════
+// Create the memory instance. It needs three things: the connection string (`uri`), the `embedder`
+// defined in Part 1, and a `topology` whose `dbName` is DB_NAME so every tier lands in the lab database.
 const mongodbMemory = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
   topology: { dbName: DB_NAME },
 })
 
+// Bootstrap now — collections, TTL indexes and Vector Search indexes — instead of on the first tool call.
 await mongodbMemory.connect()
 
-// Calling the instance returns a tools record scoped to a user + session.
+// Calling the instance returns a tools record scoped to a user + session: user 'alice', session 'alice-s1'.
 const aliceTools = mongodbMemory({ userId: 'alice', sessionId: 'alice-s1' })
 console.log('tool keys:', Object.keys(aliceTools))
 console.log('\n── tool description the LLM sees ──\n' + aliceTools.memory.description)
@@ -148,6 +151,7 @@ function buildTrailhead(userId: string, sessionId: string) {
   return new ToolLoopAgent({
     model: CHAT_MODEL,
     instructions: TRAILHEAD_INSTRUCTIONS + '\n' + MEMORY_INSTRUCTIONS,
+    // Memory is just more tools: spread the tools scoped to this userId + sessionId next to suggestTrail.
     tools: { suggestTrail, ...mongodbMemory({ userId, sessionId }) },
     stopWhen: isLoopFinished(),
   })
@@ -208,6 +212,7 @@ for (const t of sessionTurns) console.log(`  #${t.seq} ${t.role.padEnd(9)} ${t.c
 const mongodbMemoryB = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
+  // Same database, but hide the session commands from the LLM: the hooks below own the transcript now.
   topology: { dbName: DB_NAME, hideToolCommands: ['session'] },
 })
 await mongodbMemoryB.connect()
@@ -231,16 +236,18 @@ const trailheadB = new ToolLoopAgent({
   // We drop the incoming prompt/messages because the AI SDK enforces prompt XOR messages.
   prepareCall: async ({ options, prompt: _p, messages: _m, ...settings }) => {
     const { userId, sessionId, prompt } = options
+    // Load this user + session's prior turns from MongoDB as ModelMessage[].
     const history: ModelMessage[] = await mongodbMemoryB.loadSession({ userId, sessionId })
     return {
       ...settings,
       tools: { suggestTrail, ...mongodbMemoryB({ userId, sessionId }) },
       messages: [...history, { role: 'user', content: prompt }],
+      // Hand the scope (userId, sessionId, prompt) to onFinish, which only sees the finished generation.
       experimental_context: { userId, sessionId, prompt },
     }
   },
 
-  // POST: write every turn exactly once.
+  // POST: write every turn exactly once — use the hook the memory instance provides.
   onFinish: mongodbMemoryB.onFinish(),
   stopWhen: isLoopFinished(),
 })
@@ -307,6 +314,7 @@ const noteId = await store.scratchpadWrite('alice', 'alice-s4', 'Alice mentioned
 console.log('scratchpad note:', String(noteId))
 console.log('before promote:', (await store.scratchpadRead('alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
 
+// Promote the note into episodic memory for 'alice' with event type 'preference' and importance 6.
 const { episodicId } = await store.scratchpadPromote(String(noteId), 'alice', 'preference', { importance: 6 })
 console.log('promoted → episodic', String(episodicId))
 console.log('after promote: ', (await store.scratchpadRead('alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
@@ -319,6 +327,7 @@ await store.proceduralSave(
 🥾 Trail: <name> — <miles> mi, <elevation gain> ft, <difficulty>
 ✅ Why it fits: <one line tied to what you know about the user>
 ⏰ Go early: <one practical tip>`,
+  // Options: mark it as written by a person (source 'human_expert') and give it importance 9.
   { source: 'human_expert', importance: 9 },
 )
 
@@ -342,6 +351,7 @@ await chatB('alice', 'alice-s7', "Please forget where I live — I'd rather not 
 // Models sometimes pick the wrong id to forget, so also forget one fact from code, where the id is certain.
 await store.semanticSave('alice', 'Alice gym', 'Alice has a gym membership at a Denver climbing gym.', { importance: 4 })
 const gymFact = await labDb.collection('semantic_memory').findOne({ user_id: 'alice', name: 'Alice gym', is_latest: true })
+// Forget that semantic memory by id with the store (the id is gymFact's _id, as a string).
 await store.forget('semantic', String(gymFact!._id))
 
 // Find Alice's facts that are scheduled for deletion: `expire_at` is set and already in the past ($lte now).
@@ -369,7 +379,8 @@ const tunedMemory = createMongoDBMemory({
     session: { mode: 'ttl', ttlSeconds: 7 * 86_400 },   // keep transcripts a week instead of a day
   },
   filtering: {
-    minImportance: 4,          // never surface trivia in search results
+    // Never surface trivia: leave memories with importance below 4 out of search results.
+    minImportance: 4,
     numCandidatesMultiplier: 20, // better recall on $vectorSearch at slight cost
   },
   defaults: { searchLimit: 3 },
