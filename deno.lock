@@ -2,8 +2,8 @@
   "version": "5",
   "specifiers": {
     "jsr:@std/dotenv@0.225": "0.225.8",
-    "npm:@mongodb-developer/vercel-ai-memory@~0.4.2": "0.4.2_ai@6.0.282_mongodb@6.21.0_zod@3.25.76",
-    "npm:ai@6": "6.0.282_zod@3.25.76",
+    "npm:@mongodb-developer/vercel-ai-memory@~0.4.2": "0.4.2_ai@7.0.130_mongodb@6.21.0_zod@3.25.76",
+    "npm:ai@7": "7.0.130_zod@3.25.76",
     "npm:mongodb@6": "6.21.0",
     "npm:zod@^3.25.76": "3.25.76"
   },
@@ -13,8 +13,8 @@
     }
   },
   "npm": {
-    "@ai-sdk/gateway@3.0.193_zod@3.25.76": {
-      "integrity": "sha512-T2vq1EKPhbFF2Sk2MUFL/RmCg/2mp1LGbCZZSx5vh0M6Sr1EAj3wRr1EnpcwCV3/Imj2q56pT89XLiUFnB+ZgQ==",
+    "@ai-sdk/gateway@4.0.106_zod@3.25.76": {
+      "integrity": "sha512-NprSdFzyVnbEp2SDWtIgsCFIUHFCehOD9S6FQkF/dLrCmnke8w4SOK3KcmUUiEbwtVzlUF8prkaELp+ohcQaQw==",
       "dependencies": [
         "@ai-sdk/provider",
         "@ai-sdk/provider-utils",
@@ -22,23 +22,24 @@
         "zod"
       ]
     },
-    "@ai-sdk/provider-utils@4.0.51_zod@3.25.76": {
-      "integrity": "sha512-ukLTs9x1Xm6lxSIwbJIxYQxbZHmVeIczNntARZrBcOa6pjdBhqeZnATNnJMHa7M9dZ8Ji5NJbpKpvz7o5XyBtg==",
+    "@ai-sdk/provider-utils@5.0.56_zod@3.25.76": {
+      "integrity": "sha512-F7/U1YpVXEfSxRHbxScm0PVdr9lN6GaUWHnt8ws2UjuGeuxWHqCkV25dGpHAkpDHkuIXoC+aak/OqSylKSJmHw==",
       "dependencies": [
         "@ai-sdk/provider",
         "@standard-schema/spec",
+        "@workflow/serde",
         "eventsource-parser",
         "undici",
         "zod"
       ]
     },
-    "@ai-sdk/provider@3.0.16": {
-      "integrity": "sha512-9Av6kg0t/IN/dcYAAmEJ4B9OPhcEJqwSR+GfHEA8olRkindXpUHadc3p3cyvgFUQFTVm1G5thtsmgZ9yVb2w3A==",
+    "@ai-sdk/provider@4.0.24": {
+      "integrity": "sha512-iztFqJTdxNN0ZzqZAAnVPMhRMaL1bfQFa3GIPAffWQ0+dP2FXIkyMD8kHeEI7EpB/C6TR45cqOkrS7YZZ1sATA==",
       "dependencies": [
         "json-schema"
       ]
     },
-    "@mongodb-developer/vercel-ai-memory@0.4.2_ai@6.0.282_mongodb@6.21.0_zod@3.25.76": {
+    "@mongodb-developer/vercel-ai-memory@0.4.2_ai@7.0.130_mongodb@6.21.0_zod@3.25.76": {
       "integrity": "sha512-211mDBX9wz76klE37MiA3RMZZ0U2j1kgGKiS7TtMG0XxdHGAPbO+X16VB/wjzuB3lECUBwTu4HLhJezc3l8q3w==",
       "dependencies": [
         "ai",
@@ -51,9 +52,6 @@
       "dependencies": [
         "sparse-bitfield"
       ]
-    },
-    "@opentelemetry/api@1.9.1": {
-      "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
     },
     "@standard-schema/spec@1.1.0": {
       "integrity": "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="
@@ -70,13 +68,15 @@
     "@vercel/oidc@3.2.0": {
       "integrity": "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="
     },
-    "ai@6.0.282_zod@3.25.76": {
-      "integrity": "sha512-fdzEzSppVTYlgyW/Gp6tMAFIU88yv7k86x77m5vAJo7hXV31hDJCsAkq/aIpE3tP3k4LjrrLcUANPHcBZ0YWsw==",
+    "@workflow/serde@4.1.0": {
+      "integrity": "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="
+    },
+    "ai@7.0.130_zod@3.25.76": {
+      "integrity": "sha512-QkBkCogl46jXUg0SrSsdqQlOI2ZVMCjfnbBQS8t3gE21U/SO17oNMVFyjmcC9z20wOoYUA+2O2vsso0maoS7dw==",
       "dependencies": [
         "@ai-sdk/gateway",
         "@ai-sdk/provider",
         "@ai-sdk/provider-utils",
-        "@opentelemetry/api",
         "zod"
       ]
     },
@@ -122,8 +122,8 @@
         "punycode"
       ]
     },
-    "undici@6.28.1": {
-      "integrity": "sha512-zWpdTVD54H48CIybL0rWQ3ukpb9d23wM7eH5RtfdmeP70cWHNjtfo7P4vZX+5CoDcO53J4Pu5uXp7lNfjc6DRA=="
+    "undici@7.30.0": {
+      "integrity": "sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ=="
     },
     "webidl-conversions@7.0.0": {
       "integrity": "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g=="
@@ -143,7 +143,7 @@
     "dependencies": [
       "jsr:@std/dotenv@0.225",
       "npm:@mongodb-developer/vercel-ai-memory@~0.4.2",
-      "npm:ai@6",
+      "npm:ai@7",
       "npm:mongodb@6",
       "npm:zod@^3.25.76"
     ]

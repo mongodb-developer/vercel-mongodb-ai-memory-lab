@@ -74,7 +74,8 @@ const trailhead = new ToolLoopAgent({
 // deno-lint-ignore no-explicit-any
 async function chat(agent: { generate: (o: any) => PromiseLike<any> }, prompt: string, extra: Record<string, unknown> = {}) {
   console.log(`\n👤 ${prompt}`)
-  const result = await agent.generate({ prompt, ...extra })
+  // Mode B passes the restored history as `messages`; the SDK takes either a prompt or messages, not both.
+  const result = await agent.generate('messages' in extra ? extra : { prompt, ...extra })
   for (const step of result.steps) {
     for (const call of step.toolCalls) {
       console.log(`   🔧 ${call.toolName}(${JSON.stringify(call.input)})`)
@@ -212,7 +213,7 @@ for (const t of sessionTurns) console.log(`  #${t.seq} ${t.role.padEnd(9)} ${t.c
 const mongodbMemoryB = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
-  // Same database, but hide the session commands from the LLM: the hooks below own the transcript now.
+  // Same database, but hide the session commands from the LLM: the runtime owns the transcript now.
   topology: { dbName: DB_NAME, hideToolCommands: ['session'] },
 })
 await mongodbMemoryB.connect()
@@ -225,36 +226,24 @@ You have a persistent \`memory\` tool. The conversation history is already in yo
 - If the user asks you to forget something, semantic_search for it and call memory_forget with the matching memory_type + id.
 Never mention memory operations in your replies.`
 
-const trailheadB = new ToolLoopAgent({
-  model: CHAT_MODEL,
-  instructions: TRAILHEAD_INSTRUCTIONS + '\n' + MEMORY_INSTRUCTIONS_B,
+// One Mode B turn: restore → build a scoped agent → generate → persist. A serverless handler does the same per request.
+async function chatB(userId: string, sessionId: string, prompt: string, extraInstructions = '') {
+  // BEFORE: load this user + session's prior turns from MongoDB as ModelMessage[].
+  const history: ModelMessage[] = await mongodbMemoryB.loadSession({ userId, sessionId })
 
-  // Per-call options, validated by zod.
-  callOptionsSchema: z.object({ userId: z.string(), sessionId: z.string(), prompt: z.string() }),
+  const agent = new ToolLoopAgent({
+    model: CHAT_MODEL,
+    instructions: [TRAILHEAD_INSTRUCTIONS, MEMORY_INSTRUCTIONS_B, extraInstructions].join('\n'),
+    tools: { suggestTrail, ...mongodbMemoryB({ userId, sessionId }) },
+    stopWhen: isLoopFinished(),
+  })
 
-  // PRE: restore history, scope tools, stash scope for onFinish.
-  // We drop the incoming prompt/messages because the AI SDK enforces prompt XOR messages.
-  prepareCall: async ({ options, prompt: _p, messages: _m, ...settings }) => {
-    const { userId, sessionId, prompt } = options
-    // Load this user + session's prior turns from MongoDB as ModelMessage[].
-    const history: ModelMessage[] = await mongodbMemoryB.loadSession({ userId, sessionId })
-    return {
-      ...settings,
-      tools: { suggestTrail, ...mongodbMemoryB({ userId, sessionId }) },
-      messages: [...history, { role: 'user', content: prompt }],
-      // Hand the scope (userId, sessionId, prompt) to onFinish, which only sees the finished generation.
-      experimental_context: { userId, sessionId, prompt },
-    }
-  },
-
-  // POST: write every turn exactly once — use the hook the memory instance provides.
-  onFinish: mongodbMemoryB.onFinish(),
-  stopWhen: isLoopFinished(),
-})
-
-// Small wrapper so chat() keeps working: the real prompt travels in options.
-function chatB(userId: string, sessionId: string, prompt: string) {
-  return chat(trailheadB, prompt, { options: { userId, sessionId, prompt } })
+  return chat(agent, prompt, {
+    // The restored history, then this turn's prompt as a user message.
+    messages: [...history, { role: 'user', content: prompt }],
+    // AFTER: write every turn exactly once — the memory instance's hook, with this turn's scope baked in.
+    onEnd: mongodbMemoryB.onFinish({ userId, sessionId, prompt }),
+  })
 }
 console.log('✅ Trailhead (Mode B) ready — session commands hidden from the LLM:', Object.keys(mongodbMemoryB({ userId: 'x', sessionId: 'y' })))
 
@@ -276,25 +265,7 @@ console.log(`bob-s1: ${bobTurns.length} turns`)
 for (const t of bobTurns) console.log(`  #${String(t.seq).padStart(2)} ${t.role.padEnd(9)} ${t.tool_name ? '[' + t.tool_name + '] ' : ''}${t.content.slice(0, 70).replace(/\n/g, ' ')}`)
 
 // ══════════ cell 19 ══════════
-// Factory so we can build "fresh server instances" of the Mode B agent with extra instructions later.
-function buildTrailheadB(extraInstructions = '') {
-  return new ToolLoopAgent({
-    model: CHAT_MODEL,
-    instructions: TRAILHEAD_INSTRUCTIONS + '\n' + MEMORY_INSTRUCTIONS_B + '\n' + extraInstructions,
-    callOptionsSchema: z.object({ userId: z.string(), sessionId: z.string(), prompt: z.string() }),
-    prepareCall: async ({ options, prompt: _p, messages: _m, ...settings }) => ({
-      ...settings,
-      tools: { suggestTrail, ...mongodbMemoryB({ userId: options.userId, sessionId: options.sessionId }) },
-      messages: [...(await mongodbMemoryB.loadSession(options)), { role: 'user', content: options.prompt }],
-      experimental_context: options,
-    }),
-    onFinish: mongodbMemoryB.onFinish(),
-    stopWhen: isLoopFinished(),
-  })
-}
-
-const trailheadB_afterRestart = buildTrailheadB()
-await chat(trailheadB_afterRestart, 'Sorry, I got disconnected. What were we talking about?', { options: { userId: 'bob', sessionId: 'bob-s1', prompt: 'Sorry, I got disconnected. What were we talking about?' } })
+await chatB('bob', 'bob-s1', 'Sorry, I got disconnected. What were we talking about?')
 
 // ══════════ cell 20 ══════════
 await chatB('alice', 'alice-s3', "Quick update: I did the Bear Lake Loop yesterday like you suggested. Knees were fine! I'd give it an 8/10 — a bit crowded though.")
@@ -331,8 +302,8 @@ await store.proceduralSave(
   { source: 'human_expert', importance: 9 },
 )
 
-const trailheadProc = buildTrailheadB('Before recommending any trail, call procedural_search with query "trip briefing format" and follow the procedure you find exactly.')
-await chat(trailheadProc, 'Suggest something new for me next weekend.', { options: { userId: 'alice', sessionId: 'alice-s5', prompt: 'Suggest something new for me next weekend.' } })
+await chatB('alice', 'alice-s5', 'Suggest something new for me next weekend.',
+  'Before recommending any trail, call procedural_search with query "trip briefing format" and follow the procedure you find exactly.')
 
 // ══════════ cell 25 ══════════
 const showAliceFacts = async (label: string) => {
@@ -419,7 +390,9 @@ const tenantMemory = createMongoDBMemory({
   },
 })
 await tenantMemory.connect()
-console.log('tenant-scoped tool commands:\n' + (tenantMemory({ userId: 'u1', sessionId: 's1' }).memory.description ?? '').split('Commands:')[1]?.split('Rules:')[0])
+// In AI SDK v7 a tool description may also be a function, so check it's a string before slicing it.
+const tenantToolDescription = tenantMemory({ userId: 'u1', sessionId: 's1' }).memory.description
+console.log('tenant-scoped tool commands:\n' + (typeof tenantToolDescription === 'string' ? tenantToolDescription : '').split('Commands:')[1]?.split('Rules:')[0])
 
 // deno-lint-ignore no-explicit-any
 const idx = (await mongo.db(DB_NAME + '_tenants').collection('facts').listSearchIndexes().toArray()) as any[]
@@ -504,35 +477,10 @@ if (!DEPLOY_NOW) {
 }
 
 // ══════════ cell 33 ══════════
-async function askDeployed(userId: string, sessionId: string, prompt: string) {
-  console.log(`\n👤 [${sessionId}] ${prompt}`)
-  // The deployed function uses your own Vercel account's AI Gateway, which on the free tier allows a few
-  // requests per minute per model. One agent turn makes several, so wait out a rate limit instead of failing.
-  let res: Response
-  for (let attempt = 1; ; attempt++) {
-    res = await fetch(`${DEPLOY_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, sessionId, prompt }),
-    })
-    if (res.ok) break
-    const body = await res.text()
-    if (attempt < 3 && /rate limit/i.test(body)) {
-      console.log('   ⏳ AI Gateway rate limit on your Vercel account — retrying in 60 s')
-      await new Promise((r) => setTimeout(r, 60_000))
-      continue
-    }
-    throw new Error(`${res.status} ${res.statusText}: ${body}`)
-  }
-  const { text, toolCalls } = await res.json() as { text: string; toolCalls: { tool: string; input: unknown }[] }
-  for (const c of toolCalls) console.log(`   🔧 ${c.tool}`, JSON.stringify(c.input))
-  console.log(`🥾 ${text}`)
-}
-
 if (!DEPLOY_URL) {
   console.log('⏭️  No deployment yet — run the previous cell with DEPLOY_NOW = true.')
 } else {
-  const prodUser = 'prod-' + crypto.randomUUID().slice(0, 8)
-  await askDeployed(prodUser, 's1', 'I have a bad left knee and I live in Denver. Suggest an easy hike.')
-  await askDeployed(prodUser, 's2', 'Plan my Saturday hike.')
+  const health = await (await fetch(`${DEPLOY_URL}/api/chat`)).json()
+  console.log('✅ deployment healthy:', health)
+  console.log(`\n👉 Open ${DEPLOY_URL} and chat with Trailhead`)
 }

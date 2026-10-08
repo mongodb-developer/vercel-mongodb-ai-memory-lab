@@ -1,6 +1,6 @@
 # Deploy Trailhead to Vercel + MongoDB Atlas with one command
 
-This folder turns the notebook's **Mode B** agent (Part 3) into a Vercel Function at `POST /api/chat`. It also provisions a **free MongoDB Atlas cluster through the Vercel Marketplace**, so the whole setup runs from the terminal:
+This folder is the notebook's **Mode B** agent (Part 3) as a Next.js chat app: AI SDK `useChat` with Vercel's AI Elements components, memory tool calls rendered as cards, and a side panel showing what the agent remembers (read live from MongoDB). The route handler is `app/api/chat/route.ts`; the agent lives in `lib/trailhead.ts`. It also provisions a **free MongoDB Atlas cluster through the Vercel Marketplace**, so the whole setup runs from the terminal:
 
 ```bash
 ./deploy/deploy.sh
@@ -62,11 +62,25 @@ vercel deploy --prod --yes
 
 ## Local development
 
+Requires Node 22 or newer.
+
 ```bash
 cd deploy && npm install
 vercel env pull .env.local   # pulls MONGODB_URI (+ a short-lived VERCEL_OIDC_TOKEN for Gateway)
-vercel dev                   # http://localhost:3000/api/chat
+npm run dev                  # http://localhost:3000
 ```
+
+Or point it at a local Atlas deployment: put `MONGODB_URI` and `AI_GATEWAY_API_KEY` in `.env.local` instead.
+
+## How it's wired
+
+| File | What it does |
+|---|---|
+| `lib/trailhead.ts` | The memory instance (one per warm function), `suggestTrail`, and `createTrailheadAgent()` — Mode B in closure mode: history from `loadSession()` via `prepareCall`, `onEnd: memory.onFinish({ userId, sessionId, prompt })` |
+| `lib/user.ts` | The memory scope's `userId`: a server-set httpOnly cookie. Swap in your auth provider's user id in a real app — never take it from the request body |
+| `app/api/chat/route.ts` | `POST` streams a turn with `createAgentUIStreamResponse`; the client sends only its newest message. `GET` is a health check |
+| `app/api/memories/route.ts` | The current user's semantic and episodic memories, for the side panel |
+| `app/page.tsx`, `components/memory-*.tsx` | The chat UI, memory tool cards and memory panel |
 
 ## Cleanup
 

@@ -1,7 +1,7 @@
 {
   "nodeModulesDir": "auto",
   "imports": {
-    "ai": "npm:ai@^6.0.0",
+    "ai": "npm:ai@^7.0.0",
     "zod": "npm:zod@^3.25.76",
     "mongodb": "npm:mongodb@^6.0.0",
     "@mongodb-developer/vercel-ai-memory": "npm:@mongodb-developer/vercel-ai-memory@^0.4.2",

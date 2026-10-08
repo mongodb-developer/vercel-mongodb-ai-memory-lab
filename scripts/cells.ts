@@ -23,7 +23,7 @@ the MongoDB memory provider referenced in the
 | | |
 |---|---|
 | **Runtime** | Deno (this notebook runs on the Deno Jupyter kernel) |
-| **Agent framework** | \`ai\` v6 — \`ToolLoopAgent\`, \`isLoopFinished\` |
+| **Agent framework** | \`ai\` v7 — \`ToolLoopAgent\`, \`isLoopFinished\` |
 | **Models** | Chat: **Gemini 3.5 Flash Lite** — Embeddings: **Voyage AI 4 Lite** — both through **Vercel AI Gateway**, one string each to swap |
 | **Memory** | MongoDB Atlas (a local Atlas deployment for the lab, Atlas in the cloud when you ship) — 5 memory tiers, Atlas Vector Search, TTL retention |
 
@@ -31,7 +31,7 @@ the MongoDB memory provider referenced in the
 1. Why a stateless agent forgets you the moment \`generate()\` returns
 2. The three approaches to agent memory in the AI SDK, and where MongoDB fits
 3. **Mode A** — LLM-controlled memory tools (fast to prototype)
-4. **Mode B** — runtime-controlled session memory via \`prepareCall\` / \`onFinish\` hooks (production)
+4. **Mode B** — runtime-controlled session memory with \`loadSession()\` and an \`onEnd\` hook (production)
 5. The five memory tiers — session, semantic, procedural, episodic, scratchpad — and \`memory_forget\`
 6. Retention policies, retrieval filtering, multi-tenancy, and swapping models/embedders with zero code churn
 
@@ -148,7 +148,8 @@ const trailhead = new ToolLoopAgent({
 // deno-lint-ignore no-explicit-any
 async function chat(agent: { generate: (o: any) => PromiseLike<any> }, prompt: string, extra: Record<string, unknown> = {}) {
   console.log(\`\\n👤 \${prompt}\`)
-  const result = await agent.generate({ prompt, ...extra })
+  // Mode B passes the restored history as \`messages\`; the SDK takes either a prompt or messages, not both.
+  const result = await agent.generate('messages' in extra ? extra : { prompt, ...extra })
   for (const step of result.steps) {
     for (const call of step.toolCalls) {
       console.log(\`   🔧 \${call.toolName}(\${JSON.stringify(call.input)})\`)
@@ -432,27 +433,28 @@ That's what Mode B fixes.
   md(`
 ## Part 3 · Mode B — hook-driven session memory (production pattern)
 
-Instead of asking the LLM to persist the transcript, the **runtime** does it on every turn using two
-\`ToolLoopAgent\` hooks:
+Instead of asking the LLM to persist the transcript, the **runtime** does it on every turn, with two memory-package
+methods wrapped around each \`generate()\` call:
 
-| Hook | Package method | What it does |
+| When | Package method | What it does |
 |---|---|---|
-| \`prepareCall\` (pre) | \`mongodbMemory.loadSession({ userId, sessionId })\` | Reads prior turns from Mongo as \`ModelMessage[]\` and prepends them to \`messages\` |
-| \`onFinish\` (post) | \`mongodbMemory.onFinish()\` | Persists the user prompt + every assistant/tool message, exactly once per generation |
+| before the call | \`mongodbMemory.loadSession({ userId, sessionId })\` | Reads prior turns from Mongo as \`ModelMessage[]\`; we pass them as \`messages\` with the new prompt last |
+| when the call ends | \`onEnd: mongodbMemory.onFinish({ userId, sessionId, prompt })\` | Persists the user prompt + every assistant/tool message, exactly once per generation |
 
 Two details worth understanding:
 
 - \`topology.hideToolCommands: ['session']\` removes \`session_append\`/\`session_recent\` from the tool the LLM sees,
   while keeping the collection live for the hooks. (\`disable\` would turn the tier off completely.)
-- \`ToolLoopAgent\` only accepts \`onFinish\` at construction time, but the scope (\`userId\`, \`sessionId\`) is per-call.
-  We pass it through \`experimental_context\` inside \`prepareCall\`, and \`onFinish()\` reads it back from the event.
+- \`onFinish({ userId, sessionId, prompt })\` bakes the scope into the callback (*closure mode*), and AI SDK v7 lets you
+  pass \`onEnd\` per \`generate()\` call — so every turn is saved under the right user and session, and each turn builds
+  its agent from scratch, exactly like a serverless request handler does.
 `),
 
   code(`
 const mongodbMemoryB = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
-  // Same database, but hide the session commands from the LLM: the hooks below own the transcript now.
+  // Same database, but hide the session commands from the LLM: the runtime owns the transcript now.
   topology: /*▶*/{ dbName: DB_NAME, hideToolCommands: ['session'] }/*◀*/,
 })
 await mongodbMemoryB.connect()
@@ -465,36 +467,24 @@ You have a persistent \\\`memory\\\` tool. The conversation history is already i
 - If the user asks you to forget something, semantic_search for it and call memory_forget with the matching memory_type + id.
 Never mention memory operations in your replies.\`
 
-const trailheadB = new ToolLoopAgent({
-  model: CHAT_MODEL,
-  instructions: TRAILHEAD_INSTRUCTIONS + '\\n' + MEMORY_INSTRUCTIONS_B,
+// One Mode B turn: restore → build a scoped agent → generate → persist. A serverless handler does the same per request.
+async function chatB(userId: string, sessionId: string, prompt: string, extraInstructions = '') {
+  // BEFORE: load this user + session's prior turns from MongoDB as ModelMessage[].
+  const history: ModelMessage[] = await /*▶*/mongodbMemoryB.loadSession({ userId, sessionId })/*◀*/
 
-  // Per-call options, validated by zod.
-  callOptionsSchema: z.object({ userId: z.string(), sessionId: z.string(), prompt: z.string() }),
+  const agent = new ToolLoopAgent({
+    model: CHAT_MODEL,
+    instructions: [TRAILHEAD_INSTRUCTIONS, MEMORY_INSTRUCTIONS_B, extraInstructions].join('\\n'),
+    tools: { suggestTrail, ...mongodbMemoryB({ userId, sessionId }) },
+    stopWhen: isLoopFinished(),
+  })
 
-  // PRE: restore history, scope tools, stash scope for onFinish.
-  // We drop the incoming prompt/messages because the AI SDK enforces prompt XOR messages.
-  prepareCall: async ({ options, prompt: _p, messages: _m, ...settings }) => {
-    const { userId, sessionId, prompt } = options
-    // Load this user + session's prior turns from MongoDB as ModelMessage[].
-    const history: ModelMessage[] = await /*▶*/mongodbMemoryB.loadSession({ userId, sessionId })/*◀*/
-    return {
-      ...settings,
-      tools: { suggestTrail, ...mongodbMemoryB({ userId, sessionId }) },
-      messages: [...history, { role: 'user', content: prompt }],
-      // Hand the scope (userId, sessionId, prompt) to onFinish, which only sees the finished generation.
-      /*▶*/experimental_context: { userId, sessionId, prompt },/*◀*/
-    }
-  },
-
-  // POST: write every turn exactly once — use the hook the memory instance provides.
-  onFinish: /*▶*/mongodbMemoryB.onFinish()/*◀*/,
-  stopWhen: isLoopFinished(),
-})
-
-// Small wrapper so chat() keeps working: the real prompt travels in options.
-function chatB(userId: string, sessionId: string, prompt: string) {
-  return chat(trailheadB, prompt, { options: { userId, sessionId, prompt } })
+  return chat(agent, prompt, {
+    // The restored history, then this turn's prompt as a user message.
+    messages: /*▶*/[...history, { role: 'user', content: prompt }]/*◀*/,
+    // AFTER: write every turn exactly once — the memory instance's hook, with this turn's scope baked in.
+    onEnd: /*▶*/mongodbMemoryB.onFinish({ userId, sessionId, prompt })/*◀*/,
+  })
 }
 console.log('✅ Trailhead (Mode B) ready — session commands hidden from the LLM:', Object.keys(mongodbMemoryB({ userId: 'x', sessionId: 'y' })))
 `),
@@ -533,30 +523,12 @@ Every user prompt, every assistant reply, **and every tool call/result** is ther
 
 ### 3.2 "Server restart"
 
-In a real deployment the agent object lives in a serverless function that gets torn down. Simulate that: build a
-fresh agent instance with the same hooks and continue Bob's session.
+In a real deployment the agent lives in a serverless function that gets torn down between requests. \`chatB\` already
+builds a brand-new agent on every turn, so nothing survives in memory — continue Bob's session and see what it remembers.
 `),
 
   code(`
-// Factory so we can build "fresh server instances" of the Mode B agent with extra instructions later.
-function buildTrailheadB(extraInstructions = '') {
-  return new ToolLoopAgent({
-    model: CHAT_MODEL,
-    instructions: TRAILHEAD_INSTRUCTIONS + '\\n' + MEMORY_INSTRUCTIONS_B + '\\n' + extraInstructions,
-    callOptionsSchema: z.object({ userId: z.string(), sessionId: z.string(), prompt: z.string() }),
-    prepareCall: async ({ options, prompt: _p, messages: _m, ...settings }) => ({
-      ...settings,
-      tools: { suggestTrail, ...mongodbMemoryB({ userId: options.userId, sessionId: options.sessionId }) },
-      messages: [...(await mongodbMemoryB.loadSession(options)), { role: 'user', content: options.prompt }],
-      experimental_context: options,
-    }),
-    onFinish: mongodbMemoryB.onFinish(),
-    stopWhen: isLoopFinished(),
-  })
-}
-
-const trailheadB_afterRestart = buildTrailheadB()
-await chat(trailheadB_afterRestart, 'Sorry, I got disconnected. What were we talking about?', { options: { userId: 'bob', sessionId: 'bob-s1', prompt: 'Sorry, I got disconnected. What were we talking about?' } })
+await chatB('bob', 'bob-s1', 'Sorry, I got disconnected. What were we talking about?')
 `),
 
   md(`
@@ -631,8 +603,8 @@ await store.proceduralSave(
   /*▶*/{ source: 'human_expert', importance: 9 }/*◀*/,
 )
 
-const trailheadProc = buildTrailheadB('Before recommending any trail, call procedural_search with query "trip briefing format" and follow the procedure you find exactly.')
-await chat(trailheadProc, 'Suggest something new for me next weekend.', { options: { userId: 'alice', sessionId: 'alice-s5', prompt: 'Suggest something new for me next weekend.' } })
+await chatB('alice', 'alice-s5', 'Suggest something new for me next weekend.',
+  'Before recommending any trail, call procedural_search with query "trip briefing format" and follow the procedure you find exactly.')
 `),
 
   md(`
@@ -793,7 +765,9 @@ const tenantMemory = createMongoDBMemory({
   },
 })
 await tenantMemory.connect()
-console.log('tenant-scoped tool commands:\\n' + (tenantMemory({ userId: 'u1', sessionId: 's1' }).memory.description ?? '').split('Commands:')[1]?.split('Rules:')[0])
+// In AI SDK v7 a tool description may also be a function, so check it's a string before slicing it.
+const tenantToolDescription = tenantMemory({ userId: 'u1', sessionId: 's1' }).memory.description
+console.log('tenant-scoped tool commands:\\n' + (typeof tenantToolDescription === 'string' ? tenantToolDescription : '').split('Commands:')[1]?.split('Rules:')[0])
 
 // deno-lint-ignore no-explicit-any
 const idx = (await mongo.db(DB_NAME + '_tenants').collection('facts').listSearchIndexes().toArray()) as any[]
@@ -839,7 +813,7 @@ for (const [label, db] of [['voyage-4-lite', DB_NAME], ['voyage-4-large', DB_NAM
 |---|---|
 | Agent forgets everything between \`generate()\` calls | \`createMongoDBMemory()\` + \`tools: mongodbMemory({ userId, sessionId })\` |
 | Facts must survive across sessions | **Semantic** memory, scoped to the user, retrieved with Atlas Vector Search |
-| LLM sometimes skipped saving the transcript | **Mode B**: \`prepareCall\` → \`loadSession()\`, \`onFinish: mongodbMemory.onFinish()\`, \`hideToolCommands: ['session']\` |
+| LLM sometimes skipped saving the transcript | **Mode B**: \`loadSession()\` before the call, \`onEnd: mongodbMemory.onFinish({ userId, sessionId, prompt })\`, \`hideToolCommands: ['session']\` |
 | "What have I done before?" | **Episodic** memory with usage stats |
 | Temporary notes that might matter later | **Scratchpad** → \`scratchpadPromote\` |
 | Teach the agent a house style | **Procedural** memory seeded by a human expert |
@@ -850,7 +824,7 @@ for (const [label, db] of [['voyage-4-lite', DB_NAME], ['voyage-4-large', DB_NAM
 
 ### Take it further
 
-1. **Streaming UI** — port \`trailheadB\` into a Next.js route with \`createAgentUIStreamResponse({ agent, uiMessages })\` (see the package README).
+1. **Make the UI yours** — the app you deploy in Part 7 lives in \`deploy/\`: restyle the memory cards in \`components/memory-tool.tsx\`, or show procedural memories in the side panel.
 2. **Tenant filter end-to-end** — write \`tenant_id\` on save and filter on search using \`extraFilterFields\`.
 3. **Different chat model** — set \`CHAT_MODEL = 'openai/gpt-4o-mini'\` or \`'mistral/mistral-small'\` and re-run Part 3. Does memory behaviour change?
 4. **Observability** — open the Vercel AI Gateway dashboard and look at the per-request logs for this lab: how many embedding calls did one Trailhead turn cost?
@@ -880,9 +854,19 @@ console.log('✅ connections closed')
   md(`
 ## Part 7 · Ship it — Vercel + MongoDB Atlas in one call
 
-Everything so far ran against a local Atlas deployment. Now we'll put **the Mode B agent from Part 3**
-behind a real HTTPS endpoint, \`POST /api/chat\`, backed by a **brand-new free Atlas cluster in the cloud that the Vercel CLI provisions for you**.
-The code doesn't change — only \`MONGODB_URI\` does.
+Everything so far ran against a local Atlas deployment. Now **the Mode B agent from Part 3** goes live as a chat app
+on Vercel, backed by a **brand-new free Atlas cluster in the cloud that the Vercel CLI provisions for you**.
+
+\`deploy/\` is a small Next.js app built with the AI SDK's \`useChat\` and Vercel's **AI Elements** components:
+
+- every \`memory\` tool call shows up as a card — what the agent searched for or saved, and what MongoDB returned;
+- a side panel shows **what Trailhead remembers about you**, read live from the \`semantic_memory\` and
+  \`episodic_memory\` collections;
+- the server route is \`chatB\` from Part 3: \`loadSession()\` before the call, \`onEnd: mongodbMemory.onFinish(...)\` after it,
+  streamed to the browser with \`createAgentUIStreamResponse\`. Your user id is a server-set cookie, never something the
+  browser sends.
+
+The agent code doesn't change — only \`MONGODB_URI\` does.
 
 The next cell runs \`deploy/deploy.sh\`, which does:
 
@@ -891,7 +875,7 @@ The next cell runs \`deploy/deploy.sh\`, which does:
 | 1 | \`vercel whoami\` | Checks that you're logged in |
 | 2 | \`vercel link --yes --project trailhead-memory\` | Creates or links a Vercel project for \`deploy/\` |
 | 3 | \`vercel integration add mongodbatlas --plan FREE -m clusterTier=FREE -m vercelRegion=iad1\` | Creates a free **M0** cluster through the Vercel Marketplace and injects **\`MONGODB_URI\`** into the project |
-| 4 | \`vercel deploy --prod --yes\` | Builds and deploys \`deploy/api/chat.ts\` |
+| 4 | \`vercel deploy --prod --yes\` | Builds and deploys the Next.js app in \`deploy/\` |
 
 You don't need an AI Gateway key in production: Vercel Functions authenticate to the Gateway automatically, so the chat
 model and the Voyage embeddings just work.
@@ -958,47 +942,28 @@ if (!DEPLOY_NOW) {
 `),
 
   md(`
-### 7.1 Talk to the deployed agent
+### 7.1 Open your agent
 
-Same user, **two different sessions**. In session \`s2\` the transcript is empty, so any recall of the knee or Denver
-comes from **semantic memory** in the new Atlas cluster, retrieved by the agent running on Vercel.
+Open the URL from the deploy cell in a new browser tab and talk to Trailhead:
 
-> On a brand-new cluster the Vector Search indexes take about a minute to become \`READY\`. If the second answer doesn't
-> remember you, wait a moment and run this cell again.
+1. Tell it about yourself — *"I'm Alice, I live in Denver and I have bad knees"* — and watch the 💾 cards and the memory panel.
+2. Click **New session**. The conversation is empty, but ask *"Suggest a trail for me this weekend"*: the 🔎 card shows
+   the agent recalling you from the new Atlas cluster.
+3. Report a hike you did, or ask it to forget something, and watch the panel change.
+
+> On a brand-new cluster the Vector Search indexes take about a minute to become \`READY\`. If the first recall comes back
+> empty, wait a moment and ask again.
+
+The next cell checks that the deployment answers and prints the link again.
 `),
 
   code(`
-async function askDeployed(userId: string, sessionId: string, prompt: string) {
-  console.log(\`\\n👤 [\${sessionId}] \${prompt}\`)
-  // The deployed function uses your own Vercel account's AI Gateway, which on the free tier allows a few
-  // requests per minute per model. One agent turn makes several, so wait out a rate limit instead of failing.
-  let res: Response
-  for (let attempt = 1; ; attempt++) {
-    res = await fetch(\`\${DEPLOY_URL}/api/chat\`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, sessionId, prompt }),
-    })
-    if (res.ok) break
-    const body = await res.text()
-    if (attempt < 3 && /rate limit/i.test(body)) {
-      console.log('   ⏳ AI Gateway rate limit on your Vercel account — retrying in 60 s')
-      await new Promise((r) => setTimeout(r, 60_000))
-      continue
-    }
-    throw new Error(\`\${res.status} \${res.statusText}: \${body}\`)
-  }
-  const { text, toolCalls } = await res.json() as { text: string; toolCalls: { tool: string; input: unknown }[] }
-  for (const c of toolCalls) console.log(\`   🔧 \${c.tool}\`, JSON.stringify(c.input))
-  console.log(\`🥾 \${text}\`)
-}
-
 if (!DEPLOY_URL) {
   console.log('⏭️  No deployment yet — run the previous cell with DEPLOY_NOW = true.')
 } else {
-  const prodUser = 'prod-' + crypto.randomUUID().slice(0, 8)
-  await askDeployed(prodUser, 's1', 'I have a bad left knee and I live in Denver. Suggest an easy hike.')
-  await askDeployed(prodUser, 's2', 'Plan my Saturday hike.')
+  const health = await (await fetch(\`\${DEPLOY_URL}/api/chat\`)).json()
+  console.log('✅ deployment healthy:', health)
+  console.log(\`\\n👉 Open \${DEPLOY_URL} and chat with Trailhead\`)
 }
 `),
 
@@ -1010,13 +975,6 @@ The cluster is free, but if you want to remove everything, run this in a termina
 \`\`\`bash
 vercel integration resource remove trailhead-memory-atlas --disconnect-all   # deletes the Atlas resource
 vercel project remove trailhead-memory
-\`\`\`
-
-To call the API from anywhere else:
-
-\`\`\`bash
-curl -X POST <DEPLOY_URL>/api/chat -H 'content-type: application/json' \\\\
-  -d '{"userId":"bob","sessionId":"s1","prompt":"Suggest a hike near Denver"}'
 \`\`\`
 
 🎉 **That's the lab.** You built a stateless agent, gave it five tiers of MongoDB memory, and shipped it to production.

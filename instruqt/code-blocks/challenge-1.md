@@ -41,13 +41,13 @@ mongodbMemoryB.loadSession({ userId, sessionId })
 CODE_BLOCK_7
 ===
 ```typescript
-experimental_context: { userId, sessionId, prompt },
+[...history, { role: 'user', content: prompt }]
 ```
 
 CODE_BLOCK_8
 ===
 ```typescript
-mongodbMemoryB.onFinish()
+mongodbMemoryB.onFinish({ userId, sessionId, prompt })
 ```
 
 CODE_BLOCK_9
