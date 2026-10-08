@@ -16,8 +16,9 @@ const ROOT = new URL('../', import.meta.url)
 const NOTEBOOK = 'vercel-mongodb-ai-memory-lab.ipynb'
 const BLANK = /\/\*▶\*\/([\s\S]*?)\/\*◀\*\//g
 
-// Which challenge each notebook Part belongs to. Keep in step with the Instruqt track's challenges.
-const CHALLENGE_OF_PART: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 }
+// Which challenge each notebook Part belongs to. Keep in step with the Instruqt track's challenges
+// (currently one challenge: kernel state does not survive a challenge switch).
+const CHALLENGE_OF_PART: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 }
 const EXPECTED_BLANKS = 14
 
 type Blank = { n: number; challenge: number; answer: string }
