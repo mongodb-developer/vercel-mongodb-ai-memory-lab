@@ -38,7 +38,9 @@ fi
 # reuse it and nobody deploys over somebody else's project (or shares their Atlas cluster).
 if [[ -z "${PROJECT:-}" ]]; then
   VERCEL_USER="$(vc whoami 2>/dev/null | tail -n1 | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-\n' '-' | tr -d '\n')"
-  PROJECT="trailhead-memory${VERCEL_USER:+-$VERCEL_USER}"
+  # Never fall back to a shared name: that is exactly how two people end up deploying over each other.
+  [[ -n "$VERCEL_USER" ]] || { echo "✖ Could not read your Vercel username ('vercel whoami'). Set PROJECT=<a-unique-name> and re-run."; exit 1; }
+  PROJECT="trailhead-memory-$VERCEL_USER"
 fi
 RESOURCE="${RESOURCE:-${PROJECT}-atlas}"
 echo "Project: $PROJECT"
@@ -81,17 +83,11 @@ echo "DEPLOY_URL=$URL"   # machine-readable line, parsed by the notebook's deplo
 
 cat <<EOF
 
-✅ Done. Try it:
+✅ Done. Open $URL and chat with Trailhead:
+   tell it about yourself, click "New session", and ask for a trail — it remembers you from MongoDB Atlas.
 
-  curl -s $URL/api/chat
-  curl -s -X POST $URL/api/chat -H 'content-type: application/json' \\
-    -d '{"userId":"bob","sessionId":"s1","prompt":"I have a bad knee and live in Denver. Suggest a hike."}'
-
-  # New session, same user — semantic memory should recall the knee + city:
-  curl -s -X POST $URL/api/chat -H 'content-type: application/json' \\
-    -d '{"userId":"bob","sessionId":"s2","prompt":"Plan my Saturday hike."}'
+   Health check:  curl -s $URL/api/chat
 
 Note: on a brand-new cluster the Vector Search indexes take ~1 minute to become READY;
-the first semantic_search may return nothing until then.
-Deployment Protection may require you to be logged in to Vercel to hit preview URLs.
+the first recall may come back empty until then.
 EOF
