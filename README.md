@@ -5,8 +5,9 @@ watch it forget you, then give it five tiers of persistent memory with
 [`@mongodb-developer/vercel-ai-memory`](https://www.npmjs.com/package/@mongodb-developer/vercel-ai-memory) on MongoDB
 Atlas — and ship it to Vercel with a free Atlas cluster in one command.
 
-You'll write the MongoDB side yourself: inspecting the collections, TTL and Vector Search indexes the memory provider
-creates, a filtered `$vectorSearch`, transcript and episode queries, partial TTL retention and tenant filter fields.
+You'll set up and control the memory provider yourself: create and bootstrap it, scope its tools to a user and
+session, wire the production session hooks (`loadSession()` / `onFinish()`), drive the store APIs, and tune
+retention, filtering and multi-tenancy — then inspect what it writes with the MongoDB driver and `$vectorSearch`.
 
 ## Layout
 
@@ -14,7 +15,7 @@ creates, a filtered `$vectorSearch`, transcript and episode queries, partial TTL
 |---|---|
 | `labs/vercel-mongodb-ai-memory-lab.ipynb` | The lab: 14 `<CODE_BLOCK_n>` blanks to fill in |
 | `solutions/vercel-mongodb-ai-memory-lab.ipynb` | The same notebook, completed |
-| `deploy/` | The Mode B agent as a Vercel Function, plus `deploy.sh` (Vercel project + Atlas via Marketplace + deploy) |
+| `deploy/` | The Mode B agent as a Next.js chat app (AI SDK `useChat` + AI Elements, memory cards and panel), plus `deploy.sh` (your own Vercel project + Atlas via Marketplace + deploy) |
 | `scripts/cells.ts` | **Source of truth** for both notebooks |
 | `instruqt/code-blocks/` | Generated answer sheets for the hosted (Instruqt) version |
 | `instruqt/local-preview/` | Run the hosted lab's editor locally in Docker |
@@ -45,5 +46,5 @@ deno task lab      # run the whole solution headless (needs MONGODB_URI + AI_GAT
 
 ## Models
 
-Chat: `google/gemini-3.5-flash-lite`; embeddings: Voyage AI `voyage/voyage-4-lite` — both through Vercel AI Gateway.
+AI SDK v7. Chat: `google/gemini-3.5-flash-lite`; embeddings: Voyage AI `voyage/voyage-4-lite` — both through Vercel AI Gateway.
 Use a Gateway key with paid credits: free-tier keys are limited to 5 requests per minute per model.
