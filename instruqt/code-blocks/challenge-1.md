@@ -65,7 +65,7 @@ CODE_BLOCK_10
 CODE_BLOCK_11
 ===
 ```typescript
-await store.forget('semantic', String(gymFact!._id))
+await store.forget('alice', 'semantic', String(gymFact!._id))
 ```
 
 CODE_BLOCK_12

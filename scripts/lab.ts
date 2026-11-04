@@ -260,7 +260,7 @@ const turnsByRole = await labDb.collection('session_memory').aggregate([
 ]).toArray()
 console.log('bob-s1 turns by role:', Object.fromEntries(turnsByRole.map((r) => [r._id, r.turns])))
 
-const bobTurns = await mongodbMemoryB.store.sessionRecent('bob-s1', 50)
+const bobTurns = await mongodbMemoryB.store.sessionRecent('bob', 'bob-s1', 50)
 console.log(`bob-s1: ${bobTurns.length} turns`)
 for (const t of bobTurns) console.log(`  #${String(t.seq).padStart(2)} ${t.role.padEnd(9)} ${t.tool_name ? '[' + t.tool_name + '] ' : ''}${t.content.slice(0, 70).replace(/\n/g, ' ')}`)
 
@@ -283,12 +283,12 @@ const { store } = mongodbMemoryB
 
 const noteId = await store.scratchpadWrite('alice', 'alice-s4', 'Alice mentioned Bear Lake was crowded — she may prefer quieter trails or early starts.')
 console.log('scratchpad note:', String(noteId))
-console.log('before promote:', (await store.scratchpadRead('alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
+console.log('before promote:', (await store.scratchpadRead('alice', 'alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
 
 // Promote the note into episodic memory for 'alice' with event type 'preference' and importance 6.
 const { episodicId } = await store.scratchpadPromote(String(noteId), 'alice', 'preference', { importance: 6 })
 console.log('promoted → episodic', String(episodicId))
-console.log('after promote: ', (await store.scratchpadRead('alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
+console.log('after promote: ', (await store.scratchpadRead('alice', 'alice-s4')).map((n) => ({ note: n.note.slice(0, 40) + '…', promoted: n.promoted })))
 
 // ══════════ cell 24 ══════════
 await store.proceduralSave(
@@ -323,7 +323,7 @@ await chatB('alice', 'alice-s7', "Please forget where I live — I'd rather not 
 await store.semanticSave('alice', 'Alice gym', 'Alice has a gym membership at a Denver climbing gym.', { importance: 4 })
 const gymFact = await labDb.collection('semantic_memory').findOne({ user_id: 'alice', name: 'Alice gym', is_latest: true })
 // Forget that semantic memory by id with the store (the id is gymFact's _id, as a string).
-await store.forget('semantic', String(gymFact!._id))
+await store.forget('alice', 'semantic', String(gymFact!._id))
 
 // Find Alice's facts that are scheduled for deletion: `expire_at` is set and already in the past ($lte now).
 const forgotten = await labDb.collection('semantic_memory').find({ user_id: 'alice', expire_at: { $lte: new Date() } }).toArray()
