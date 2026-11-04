@@ -29,21 +29,41 @@ SCOPE=""; [[ -n "${VERCEL_SCOPE:-}" ]] && SCOPE="--scope $VERCEL_SCOPE"
 vc() { $VC $NI $SCOPE "$@"; }
 
 step "1/4 Checking Vercel login"
-if ! vc whoami >/dev/null 2>&1; then
-  if [[ $INTERACTIVE == 1 ]]; then vc login
-  else echo "✖ Not logged in to Vercel. Run 'vercel login' in a terminal once, then re-run."; exit 1; fi
+# Run whoami outside deploy/: inside it, a .vercel/ link left by another Vercel account pins that account's team,
+# and whoami then fails with "forbidden" even though you are logged in.
+whoami_out() { (cd / && vc whoami 2>&1); }
+if ! WHOAMI="$(whoami_out)"; then
+  if [[ $INTERACTIVE == 1 ]] && grep -qiE 'not.*logged|login|credentials' <<<"$WHOAMI"; then vc login; WHOAMI="$(whoami_out)" || { echo "$WHOAMI"; exit 1; }
+  else
+    echo "$WHOAMI"
+    echo "✖ 'vercel whoami' failed (output above). If it says you are not logged in, run 'vercel login' in a terminal, then re-run."
+    exit 1
+  fi
 fi
 
 # One project per person, even when a workshop shares a Vercel team: name it after the Vercel username, so re-runs
 # reuse it and nobody deploys over somebody else's project (or shares their Atlas cluster).
 if [[ -z "${PROJECT:-}" ]]; then
-  VERCEL_USER="$(vc whoami 2>/dev/null | tail -n1 | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-\n' '-' | tr -d '\n')"
+  VERCEL_USER="$( (cd / && vc whoami 2>/dev/null) | tail -n1 | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-\n' '-' | tr -d '\n')"
   # Never fall back to a shared name: that is exactly how two people end up deploying over each other.
   [[ -n "$VERCEL_USER" ]] || { echo "✖ Could not read your Vercel username ('vercel whoami'). Set PROJECT=<a-unique-name> and re-run."; exit 1; }
   PROJECT="trailhead-memory-$VERCEL_USER"
 fi
-RESOURCE="${RESOURCE:-${PROJECT}-atlas}"
+# The resource name becomes the Atlas cluster name, which Atlas truncates to 23 characters. A cut that ends on "-"
+# is an invalid hostname (e.g. "trailhead-memory-sales-"), so keep it short and never end it with a dash.
+if [[ -z "${RESOURCE:-}" ]]; then
+  RESOURCE="th-${PROJECT#trailhead-memory-}"
+  RESOURCE="${RESOURCE:0:23}"
+  while [[ $RESOURCE == *- ]]; do RESOURCE="${RESOURCE%-}"; done
+fi
 echo "Project: $PROJECT"
+
+# A link to a different project (another Vercel login on this machine, or a renamed PROJECT) would make every
+# command below act on it, usually with "forbidden". Drop it, and the env it pulled, before linking ours.
+if [[ -f .vercel/project.json ]] && ! grep -q "\"projectName\":\"$PROJECT\"" .vercel/project.json; then
+  echo "Removing a stale .vercel link to another project: $(cat .vercel/project.json)"
+  rm -rf .vercel .env.local
+fi
 
 step "2/4 Linking/creating Vercel project '$PROJECT'${VERCEL_SCOPE:+ in team '$VERCEL_SCOPE'}"
 if ! LINK_OUT="$(vc link --yes --project "$PROJECT" 2>&1)"; then
@@ -68,7 +88,7 @@ else
     -m clusterTier=FREE \
     -m vercelRegion="$REGION" \
     -e production -e preview -e development; then
-    echo "✖ Atlas provisioning failed. If this is the first Marketplace install on your team, run in a terminal:"
+    echo "✖ Atlas provisioning failed — the reason is in the output above. If it mentions terms (first Marketplace install on your team), run in a terminal:"
     echo "    vercel integration accept-terms mongodbatlas"
     echo "  then re-run. (Accepting terms needs a human at an interactive terminal.)"
     exit 1
@@ -77,21 +97,39 @@ fi
 
 # AI Gateway: plant the key on the project when we have one (the lab's /etc/lab-env or your .env). Without it the
 # function falls back to Vercel OIDC, which only works if the team has AI Gateway access/credits.
+# A terminal opened before `set-gateway-key` ran never loaded the key, so read the env files ourselves.
+if [[ -z "${AI_GATEWAY_API_KEY:-}" ]]; then
+  for f in /etc/lab-env "$HERE/../.env"; do
+    if [[ -f $f ]]; then
+      KEY_LINE="$(grep -E '^AI_GATEWAY_API_KEY=' "$f" | tail -n1 || true)"
+      [[ -n "$KEY_LINE" ]] && { AI_GATEWAY_API_KEY="$(sed -E 's/^AI_GATEWAY_API_KEY=//; s/^"(.*)"$/\1/' <<<"$KEY_LINE")"; break; }
+    fi
+  done
+fi
+step "Setting AI_GATEWAY_API_KEY on the project"
 if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
-  step "Setting AI_GATEWAY_API_KEY on the project"
-  for ENV_NAME in production preview development; do
-    vc env rm AI_GATEWAY_API_KEY "$ENV_NAME" --yes >/dev/null 2>&1 || true
-    # Preview with a branch requirement is skipped by the CLI in non-interactive mode, so tolerate failures there.
-    printf '%s' "$AI_GATEWAY_API_KEY" | vc env add AI_GATEWAY_API_KEY "$ENV_NAME" --sensitive >/dev/null 2>&1 \
-      || { [[ $ENV_NAME == production ]] && { echo "✖ Could not set AI_GATEWAY_API_KEY on production."; exit 1; }; true; }
+  # Sensitive variables can't target Development, and the deployed app only reads Production (and Preview).
+  for ENV_NAME in production preview; do
+    if ENV_OUT="$(printf '%s' "$AI_GATEWAY_API_KEY" | vc env add AI_GATEWAY_API_KEY "$ENV_NAME" --sensitive --force --yes 2>&1)"; then
+      echo "✓ AI_GATEWAY_API_KEY set for $ENV_NAME (…${AI_GATEWAY_API_KEY: -4})"
+    else
+      echo "$ENV_OUT"
+      if [[ $ENV_NAME == production ]]; then echo "✖ Could not set AI_GATEWAY_API_KEY on production (output above)."; exit 1; fi
+      echo "ℹ Skipped $ENV_NAME (output above); production is what the deployment uses."
+    fi
   done
 else
-  echo "ℹ AI_GATEWAY_API_KEY not set: relying on Vercel OIDC for AI Gateway (needs AI Gateway enabled on your team)."
+  echo "ℹ No AI_GATEWAY_API_KEY in the environment, /etc/lab-env or .env: relying on Vercel OIDC (needs AI Gateway enabled on your team)."
 fi
 
 step "4/4 Deploying to production"
+# Deploy a copy outside any git repo. Inside the lab clone the CLI attaches the lab's last commit, and Vercel blocks
+# a deployment whose commit author (the lab's maintainer, not you) can't be matched to a member of your team.
+DEPLOY_SRC="$(mktemp -d)"
+trap 'rm -rf "$DEPLOY_SRC"' EXIT
+tar --exclude=./node_modules --exclude=./.next --exclude='./.env*' -cf - . | tar -xf - -C "$DEPLOY_SRC"
 # Non-interactive mode prints JSON, so stop the match at quotes and commas too.
-URL="$(vc deploy --prod --yes --regions "$REGION" | grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' | tail -1)"
+URL="$(vc deploy --cwd "$DEPLOY_SRC" --prod --yes --regions "$REGION" | grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' | tail -1)"
 [[ -n "$URL" ]] || { echo "✖ Could not read the deployment URL from 'vercel deploy' output."; exit 1; }
 echo "DEPLOY_URL=$URL"   # machine-readable line, parsed by the notebook's deploy cell
 
