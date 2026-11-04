@@ -85,3 +85,26 @@ CODE_BLOCK_14
 ```typescript
 { semantic: ['tenant_id'], episodic: ['tenant_id'] }
 ```
+
+### Part 7 · Ship it: run these once in the Terminal
+
+[button label="Open the Terminal"](tab-1)
+
+1. Sign in to Vercel (open the link it prints, then come back):
+
+```run
+vercel login
+```
+
+2. Accept the MongoDB Atlas Marketplace terms (first Atlas install on your Vercel account):
+
+```run
+vercel integration accept-terms mongodbatlas
+```
+
+3. Back in the notebook, set `DEPLOY_NOW = true` in the Part 7 cell and run it. Or deploy from the Terminal instead
+   (your `AI_GATEWAY_API_KEY` is copied to the Vercel project):
+
+```run
+cd /root/labs/vercel-mongodb-ai-memory-lab && ./deploy/deploy.sh
+```

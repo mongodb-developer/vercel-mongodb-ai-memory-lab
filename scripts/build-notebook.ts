@@ -23,6 +23,35 @@ const EXPECTED_BLANKS = 14
 
 type Blank = { n: number; challenge: number; answer: string }
 
+// Part 7 needs two one-time commands at a real terminal (a notebook cell has no keyboard for the login link or the
+// Marketplace terms). They go on the answer sheet of Part 7's challenge as Instruqt `run` blocks (Copy + Run buttons
+// that execute in the terminal) plus a button that switches to the Terminal tab. TERMINAL_TAB must match the
+// Terminal tab's position in the track's challenge config (tab-0 is the first tab).
+const TERMINAL_TAB = 'tab-1'
+const PART7_SHEET = `### Part 7 · Ship it: run these once in the Terminal
+
+[button label="Open the Terminal"](${TERMINAL_TAB})
+
+1. Sign in to Vercel (open the link it prints, then come back):
+
+\`\`\`run
+vercel login
+\`\`\`
+
+2. Accept the MongoDB Atlas Marketplace terms (first Atlas install on your Vercel account):
+
+\`\`\`run
+vercel integration accept-terms mongodbatlas
+\`\`\`
+
+3. Back in the notebook, set \`DEPLOY_NOW = true\` in the Part 7 cell and run it. Or deploy from the Terminal instead
+   (your \`AI_GATEWAY_API_KEY\` is copied to the Vercel project):
+
+\`\`\`run
+cd /root/labs/vercel-mongodb-ai-memory-lab && ./deploy/deploy.sh
+\`\`\`
+`
+
 // Lines after the first keep their source indentation; strip the common part so answers paste cleanly.
 const dedent = (snippet: string) => {
   const [first, ...rest] = snippet.trim().split('\n')
@@ -115,12 +144,10 @@ const challenges = [...new Set(Object.values(CHALLENGE_OF_PART))]
 const sheets = new Map<number, string>()
 for (const ch of challenges) {
   const mine = blanks.filter((b) => b.challenge === ch)
-  sheets.set(
-    ch,
-    mine.length === 0
-      ? 'This challenge has no code blocks to fill in: run the cells as they are.\n'
-      : mine.map((b) => `CODE_BLOCK_${b.n}\n===\n\`\`\`typescript\n${b.answer}\n\`\`\`\n`).join('\n'),
-  )
+  const blocks = mine.length === 0
+    ? 'This challenge has no code blocks to fill in: run the cells as they are.\n'
+    : mine.map((b) => `CODE_BLOCK_${b.n}\n===\n\`\`\`typescript\n${b.answer}\n\`\`\`\n`).join('\n')
+  sheets.set(ch, CHALLENGE_OF_PART[7] === ch ? `${blocks}\n${PART7_SHEET}` : blocks)
 }
 await Deno.mkdir(new URL('instruqt/code-blocks/', ROOT), { recursive: true })
 for (const [ch, sheet] of sheets) {

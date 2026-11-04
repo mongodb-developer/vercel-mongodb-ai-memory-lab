@@ -5,8 +5,8 @@
 #   PROJECT=my-trailhead REGION=iad1 ./deploy/deploy.sh
 #   VERCEL_SCOPE=my-team ./deploy/deploy.sh   # required when your login belongs to more than one team
 #
-# Requires: Node 18+, `vercel login` done once. Models go through AI Gateway, which
-# authenticates with the project's OIDC token on Vercel, so no API key is copied.
+# Requires: Node 18+, `vercel login` done once. Models go through AI Gateway: if
+# AI_GATEWAY_API_KEY is set in the environment it is copied to the project, otherwise Vercel OIDC is used.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,6 +73,20 @@ else
     echo "  then re-run. (Accepting terms needs a human at an interactive terminal.)"
     exit 1
   fi
+fi
+
+# AI Gateway: plant the key on the project when we have one (the lab's /etc/lab-env or your .env). Without it the
+# function falls back to Vercel OIDC, which only works if the team has AI Gateway access/credits.
+if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
+  step "Setting AI_GATEWAY_API_KEY on the project"
+  for ENV_NAME in production preview development; do
+    vc env rm AI_GATEWAY_API_KEY "$ENV_NAME" --yes >/dev/null 2>&1 || true
+    # Preview with a branch requirement is skipped by the CLI in non-interactive mode, so tolerate failures there.
+    printf '%s' "$AI_GATEWAY_API_KEY" | vc env add AI_GATEWAY_API_KEY "$ENV_NAME" --sensitive >/dev/null 2>&1 \
+      || { [[ $ENV_NAME == production ]] && { echo "✖ Could not set AI_GATEWAY_API_KEY on production."; exit 1; }; true; }
+  done
+else
+  echo "ℹ AI_GATEWAY_API_KEY not set: relying on Vercel OIDC for AI Gateway (needs AI Gateway enabled on your team)."
 fi
 
 step "4/4 Deploying to production"

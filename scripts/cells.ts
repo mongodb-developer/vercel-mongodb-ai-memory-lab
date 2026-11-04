@@ -877,8 +877,8 @@ The next cell runs \`deploy/deploy.sh\`, which does:
 | 3 | \`vercel integration add mongodbatlas --plan FREE -m clusterTier=FREE -m vercelRegion=iad1\` | Creates a free **M0** cluster through the Vercel Marketplace and injects **\`MONGODB_URI\`** into the project |
 | 4 | \`vercel deploy --prod --yes\` | Builds and deploys the Next.js app in \`deploy/\` |
 
-You don't need an AI Gateway key in production: Vercel Functions authenticate to the Gateway automatically, so the chat
-model and the Voyage embeddings just work.
+The script also copies your \`AI_GATEWAY_API_KEY\` (already set in the lab) to the Vercel project, so the chat model and
+the Voyage embeddings work in production. Without a key it falls back to Vercel's automatic OIDC auth.
 
 > **Do these once in the Terminal first.** A notebook cell has no keyboard, so the script runs in
 > \`--non-interactive\` mode and **stops with a hint** instead of prompting:
@@ -886,7 +886,8 @@ model and the Voyage embeddings just work.
 > vercel login                                   # opens a sign-in link
 > vercel integration accept-terms mongodbatlas   # first Atlas Marketplace install on your account
 > \`\`\`
-> On your laptop without the CLI installed, prefix both with \`npx\`.
+> **In the hosted lab:** both commands are in the side panel under *Part 7*. Click **Run** on each, or use
+> **Open the Terminal** to go there. On your laptop without the CLI installed, prefix both with \`npx\`.
 
 Deploying is **off by default** so that *Run All* never creates cloud resources by accident. Set \`DEPLOY_NOW = true\` and run the cell.
 It takes about 1–3 minutes, and the CLI output streams in below.

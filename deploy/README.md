@@ -29,7 +29,7 @@ Without the CLI installed, prefix both with `npx vercel@63.0.1` (the version `de
 
 The script skips step 3 when the project already has `MONGODB_URI`, so you can run it again to redeploy.
 
-**AI Gateway needs no key on Vercel.** Deployed functions authenticate with the project's OIDC token, so the chat model (`'google/gemini-3.5-flash-lite'`) and Voyage embeddings (`gateway.embeddingModel('voyage/voyage-4-lite')`) work without setting `AI_GATEWAY_API_KEY`.
+**AI Gateway key.** If `AI_GATEWAY_API_KEY` is set in your environment (the hosted lab loads it from `/etc/lab-env`), `deploy.sh` copies it to the project's production/preview/development env before deploying, so the chat model (`'google/gemini-3.5-flash-lite'`) and Voyage embeddings work. Without it, functions fall back to the project's OIDC token, which needs AI Gateway enabled on your team.
 
 ## Why the Vercel CLI and not the Atlas CLI?
 
