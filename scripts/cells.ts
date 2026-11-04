@@ -886,8 +886,8 @@ the Voyage embeddings work in production. Without a key it falls back to Vercel'
 > vercel login                                   # opens a sign-in link
 > vercel integration accept-terms mongodbatlas   # first Atlas Marketplace install on your account
 > \`\`\`
-> **In the hosted lab:** both commands are in the side panel under *Part 7*. Click **Run** on each, or use
-> **Open the Terminal** to go there. On your laptop without the CLI installed, prefix both with \`npx\`.
+> **In the hosted lab:** both commands are in the side panel under *Part 7*: click **Run** on each, and the
+> **Terminal** button takes you there. On your laptop without the CLI installed, prefix both with \`npx\`.
 
 Deploying is **off by default** so that *Run All* never creates cloud resources by accident. Set \`DEPLOY_NOW = true\` and run the cell.
 It takes about 1–3 minutes, and the CLI output streams in below.
