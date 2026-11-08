@@ -66,7 +66,7 @@ By the end of the lab, attendees can:
 | Agent framework | `ai` v6 (`ToolLoopAgent`) | Current AI SDK agent abstraction |
 | Chat model | **Gemini 2.5 Flash** via `@ai-sdk/google` | Can also be routed through Gateway (for example `openai/gpt-4o-mini`) |
 | Embeddings | **Voyage AI 4 Lite** (`voyage/voyage-4-lite`) via **Vercel AI Gateway** | MongoDB's embedding models; dimensions detected automatically |
-| Memory | `@mongodb-developer/vercel-ai-memory` ^0.4.2 | Five tiers, single `memory` tool, hooks for Mode B |
+| Memory | `@mongodb-developer/vercel-ai-memory` ^1.0.0 | Five tiers, single `memory` tool, hooks for Mode B |
 | Database | MongoDB Atlas (M0 free tier works) | Collections, Vector Search and TTL indexes created automatically |
 
 **Repository layout**
@@ -106,7 +106,7 @@ VercelLab/
 | Vector index not ready right after creation | `connect()` is called explicitly early, the index status is printed, and the notebook tells attendees to wait a few seconds if it shows `PENDING`. |
 | TTL deletion isn't immediate (~60 s sweep) | Explained in 4.5; attendees check `expire_at` instead of waiting for deletion. |
 | Deno / Jupyter kernel setup friction | One command, `deno jupyter --install`, plus a checklist in the lab guide; the smoke test (`deno task smoke`) catches configuration problems before the lab starts. |
-| Package API changes (pre-1.0) | Version pinned to `^0.4.2`; `deno task check` type-checks every notebook cell in CI. |
+| Package API changes | Version pinned to `^1.0.0` (GA, semver-stable); `deno task check` type-checks every notebook cell in CI. |
 
 ## 10. Open questions for reviewers
 

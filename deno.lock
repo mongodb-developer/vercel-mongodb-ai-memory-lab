@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@std/dotenv@0.225": "0.225.8",
-    "npm:@mongodb-developer/vercel-ai-memory@0.6": "0.6.0_ai@7.0.130_mongodb@6.21.0_zod@3.25.76",
+    "npm:@mongodb-developer/vercel-ai-memory@1": "1.0.0_ai@7.0.130_mongodb@6.21.0_zod@3.25.76",
     "npm:ai@7": "7.0.130_zod@3.25.76",
     "npm:mongodb@6": "6.21.0",
     "npm:zod@^3.25.76": "3.25.76"
@@ -39,8 +39,8 @@
         "json-schema"
       ]
     },
-    "@mongodb-developer/vercel-ai-memory@0.6.0_ai@7.0.130_mongodb@6.21.0_zod@3.25.76": {
-      "integrity": "sha512-XLPbaQe2upNhdCUDMud1JBL5yaKP4IELbuWD8lrOO2GkVwYPuCrjgizufjnBHMpanzCXgubRREW2w1+sbFOrsA==",
+    "@mongodb-developer/vercel-ai-memory@1.0.0_ai@7.0.130_mongodb@6.21.0_zod@3.25.76": {
+      "integrity": "sha512-A15jzxZJmVCh2q3cgRNG/Kh+ZwLL7K+7i6f6wgzKfpQHdC5So1govqlI2l1tWppdFh1qxWQfLZm4xNhtYodHlA==",
       "dependencies": [
         "ai",
         "mongodb",
@@ -142,7 +142,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/dotenv@0.225",
-      "npm:@mongodb-developer/vercel-ai-memory@0.6",
+      "npm:@mongodb-developer/vercel-ai-memory@1",
       "npm:ai@7",
       "npm:mongodb@6",
       "npm:zod@^3.25.76"
