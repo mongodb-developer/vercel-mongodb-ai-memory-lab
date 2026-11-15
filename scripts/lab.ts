@@ -214,7 +214,7 @@ const mongodbMemoryB = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
   // Same database, but hide the session commands from the LLM: the runtime owns the transcript now.
-  topology: { dbName: DB_NAME, hideToolCommands: ['session'] },
+  topology: { dbName: DB_NAME, hideToolCommands: ['session'] }
 })
 await mongodbMemoryB.connect()
 
@@ -238,12 +238,12 @@ async function chatB(userId: string, sessionId: string, prompt: string, extraIns
     stopWhen: isLoopFinished(),
   })
 
-  return chat(agent, prompt, {
-    // The restored history, then this turn's prompt as a user message.
-    messages: [...history, { role: 'user', content: prompt }],
-    // AFTER: write every turn exactly once — the memory instance's hook, with this turn's scope baked in.
-    onEnd: mongodbMemoryB.onFinish({ userId, sessionId, prompt }),
-  })
+  // The restored history, then this turn's prompt as a user message.
+  const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }]
+  // AFTER: write every turn exactly once — the memory instance's hook, with this turn's scope baked in.
+  const onEnd = mongodbMemoryB.onFinish({ userId, sessionId, prompt })
+
+  return chat(agent, prompt, { messages, onEnd })
 }
 console.log('✅ Trailhead (Mode B) ready — session commands hidden from the LLM:', Object.keys(mongodbMemoryB({ userId: 'x', sessionId: 'y' })))
 
@@ -299,7 +299,7 @@ await store.proceduralSave(
 ✅ Why it fits: <one line tied to what you know about the user>
 ⏰ Go early: <one practical tip>`,
   // Options: mark it as written by a person (source 'human_expert') and give it importance 9.
-  { source: 'human_expert', importance: 9 },
+  { source: 'human_expert', importance: 9 }
 )
 
 await chatB('alice', 'alice-s5', 'Suggest something new for me next weekend.',
@@ -338,9 +338,6 @@ const tunedMemory = createMongoDBMemory({
   embedder,
   topology: { dbName: TUNED_DB },
   retention: {
-    // Low-importance facts expire after 7 days; importance ≥ 7 lives forever.
-    // Use mode 'ttl+importance' — it becomes a TTL index with a partialFilterExpression on importance.
-    semantic: { mode: 'ttl+importance', ttlSeconds: 7 * 86_400, minImportance: 7 },
     // Forgetting curve: lifetime doubles with each importance point, refreshed every time it's read.
     episodic: {
       mode: 'dynamic',
@@ -348,6 +345,9 @@ const tunedMemory = createMongoDBMemory({
       computeExpireAt: ({ importance }) => new Date(Date.now() + Math.pow(2, importance) * 3600 * 1000),
     },
     session: { mode: 'ttl', ttlSeconds: 7 * 86_400 },   // keep transcripts a week instead of a day
+    // Low-importance facts expire after 7 days; importance ≥ 7 lives forever.
+    // Use mode 'ttl+importance' — it becomes a TTL index with a partialFilterExpression on importance.
+    semantic: { mode: 'ttl+importance', ttlSeconds: 7 * 86_400, minImportance: 7 }
   },
   filtering: {
     // Never surface trivia: leave memories with importance below 4 out of search results.
@@ -386,7 +386,7 @@ const tenantMemory = createMongoDBMemory({
     vectorIndexNames: { semantic: 'facts_vs' },
     disable: ['scratchpad', 'procedural'],                          // tiers this product doesn't use
     // Add 'tenant_id' as an extra Vector Search filter field on the semantic and episodic tiers.
-    extraFilterFields: { semantic: ['tenant_id'], episodic: ['tenant_id'] },
+    extraFilterFields: { semantic: ['tenant_id'], episodic: ['tenant_id'] }
   },
 })
 await tenantMemory.connect()

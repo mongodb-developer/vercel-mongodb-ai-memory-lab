@@ -25,7 +25,7 @@ the MongoDB memory provider referenced in the
 | **Runtime** | Deno (this notebook runs on the Deno Jupyter kernel) |
 | **Agent framework** | \`ai\` v7 — \`ToolLoopAgent\`, \`isLoopFinished\` |
 | **Models** | Chat: **Gemini 3.5 Flash Lite** — Embeddings: **Voyage AI 4 Lite** — both through **Vercel AI Gateway**, one string each to swap |
-| **Memory** | MongoDB Atlas (a local Atlas deployment for the lab, Atlas in the cloud when you ship) — 5 memory tiers, Atlas Vector Search, TTL retention |
+| **Memory** | MongoDB Atlas (a local Atlas deployment for the lab, Atlas in the cloud when you ship) — 5 memory tiers, MongoDB Vector Search, TTL retention |
 
 ### What you'll learn
 1. Why a stateless agent forgets you the moment \`generate()\` returns
@@ -36,7 +36,7 @@ the MongoDB memory provider referenced in the
 6. Retention policies, retrieval filtering, multi-tenancy, and swapping models/embedders with zero code churn
 
 ### Prerequisites
-- **In the hosted lab:** nothing — a local Atlas deployment (with Atlas Vector Search) is running on this machine and \`MONGODB_URI\` / \`AI_GATEWAY_API_KEY\` are already set in \`/etc/lab-env\`.
+- **In the hosted lab:** nothing — a local Atlas deployment (with MongoDB Vector Search) is running on this machine and \`MONGODB_URI\` / \`AI_GATEWAY_API_KEY\` are already set in \`/etc/lab-env\`.
 - **On your laptop:** a local Atlas deployment (\`atlas deployments setup --type local\`) or any Atlas cluster, a Vercel AI Gateway API key, and a \`.env\` file (copy \`.env.example\`) with \`MONGODB_URI\` and \`AI_GATEWAY_API_KEY\`.
 - **For Part 7:** a free [Vercel](https://vercel.com/signup) account.
 
@@ -211,7 +211,7 @@ We're taking the **memory provider** route with MongoDB because:
 - it's a real database you can query, index, and inspect — nothing is hidden inside a SaaS
 - it plugs into \`ToolLoopAgent\` as a plain tools record: \`tools: mongodbMemory({ userId, sessionId })\`
 
-<details><summary>The five memory tiers (click)</summary>
+**The five memory tiers**
 
 | Tier | What it holds | Lifetime (default) | Vector search |
 |---|---|---|---|
@@ -222,7 +222,6 @@ We're taking the **memory provider** route with MongoDB because:
 | **Scratchpad** | temporary working notes, promotable to episodic | 1 h | — |
 
 Plus \`memory_forget\` for agent-driven deletion.
-</details>
 `),
 
   md(`
@@ -263,7 +262,7 @@ small for the model and lets the package hide/disable commands per deployment.
 ### 2.2 Peek at what was created in Atlas
 
 \`connect()\` bootstrapped a whole schema. Here's the driver listing it: the collections, their **TTL indexes**
-(regular indexes with \`expireAfterSeconds\`) and their **Atlas Vector Search indexes** (search indexes, listed separately).
+(regular indexes with \`expireAfterSeconds\`) and their **MongoDB Vector Search indexes** (search indexes, listed separately).
 `),
 
   code(`
@@ -287,7 +286,7 @@ await describeDb()
 `),
 
   md(`
-Three collections have an Atlas Vector Search index (**semantic, procedural, episodic**) whose \`numDimensions\`
+Three collections have an MongoDB Vector Search index (**semantic, procedural, episodic**) whose \`numDimensions\`
 came from probing \`voyage-4-lite\`. Every collection has an \`expire_at\` TTL index (\`expireAfterSeconds: 0\`) that
 powers \`memory_forget\` and dynamic retention, plus a per-tier TTL where the default policy is \`ttl\`.
 
@@ -455,7 +454,7 @@ const mongodbMemoryB = createMongoDBMemory({
   uri: MONGODB_URI,
   embedder,
   // Same database, but hide the session commands from the LLM: the runtime owns the transcript now.
-  topology: /*▶*/{ dbName: DB_NAME, hideToolCommands: ['session'] }/*◀*/,
+  topology: /*▶*/{ dbName: DB_NAME, hideToolCommands: ['session'] }/*◀*/
 })
 await mongodbMemoryB.connect()
 
@@ -479,12 +478,12 @@ async function chatB(userId: string, sessionId: string, prompt: string, extraIns
     stopWhen: isLoopFinished(),
   })
 
-  return chat(agent, prompt, {
-    // The restored history, then this turn's prompt as a user message.
-    messages: /*▶*/[...history, { role: 'user', content: prompt }]/*◀*/,
-    // AFTER: write every turn exactly once — the memory instance's hook, with this turn's scope baked in.
-    onEnd: /*▶*/mongodbMemoryB.onFinish({ userId, sessionId, prompt })/*◀*/,
-  })
+  // The restored history, then this turn's prompt as a user message.
+  const messages: ModelMessage[] = /*▶*/[...history, { role: 'user', content: prompt }]/*◀*/
+  // AFTER: write every turn exactly once — the memory instance's hook, with this turn's scope baked in.
+  const onEnd = /*▶*/mongodbMemoryB.onFinish({ userId, sessionId, prompt })/*◀*/
+
+  return chat(agent, prompt, { messages, onEnd })
 }
 console.log('✅ Trailhead (Mode B) ready — session commands hidden from the LLM:', Object.keys(mongodbMemoryB({ userId: 'x', sessionId: 'y' })))
 `),
@@ -600,7 +599,7 @@ await store.proceduralSave(
 ✅ Why it fits: <one line tied to what you know about the user>
 ⏰ Go early: <one practical tip>\`,
   // Options: mark it as written by a person (source 'human_expert') and give it importance 9.
-  /*▶*/{ source: 'human_expert', importance: 9 }/*◀*/,
+  /*▶*/{ source: 'human_expert', importance: 9 }/*◀*/
 )
 
 await chatB('alice', 'alice-s5', 'Suggest something new for me next weekend.',
@@ -694,9 +693,6 @@ const tunedMemory = createMongoDBMemory({
   embedder,
   topology: { dbName: TUNED_DB },
   retention: {
-    // Low-importance facts expire after 7 days; importance ≥ 7 lives forever.
-    // Use mode 'ttl+importance' — it becomes a TTL index with a partialFilterExpression on importance.
-    semantic: /*▶*/{ mode: 'ttl+importance', ttlSeconds: 7 * 86_400, minImportance: 7 }/*◀*/,
     // Forgetting curve: lifetime doubles with each importance point, refreshed every time it's read.
     episodic: {
       mode: 'dynamic',
@@ -704,6 +700,9 @@ const tunedMemory = createMongoDBMemory({
       computeExpireAt: ({ importance }) => new Date(Date.now() + Math.pow(2, importance) * 3600 * 1000),
     },
     session: { mode: 'ttl', ttlSeconds: 7 * 86_400 },   // keep transcripts a week instead of a day
+    // Low-importance facts expire after 7 days; importance ≥ 7 lives forever.
+    // Use mode 'ttl+importance' — it becomes a TTL index with a partialFilterExpression on importance.
+    semantic: /*▶*/{ mode: 'ttl+importance', ttlSeconds: 7 * 86_400, minImportance: 7 }/*◀*/
   },
   filtering: {
     // Never surface trivia: leave memories with importance below 4 out of search results.
@@ -747,7 +746,7 @@ console.log('search "medical conditions" →', (await t.semanticSearch('carol', 
 ### 5.3 Multi-tenancy
 
 Memory is always scoped by \`userId\`. For SaaS you often need another dimension (workspace, org). \`extraFilterFields\`
-adds scalar fields to the Atlas Vector Search index as filters, and you can also rename collections / the database
+adds scalar fields to the MongoDB Vector Search index as filters, and you can also rename collections / the database
 per tenant. Combined with per-user scoping this gives you isolation without separate clusters.
 `),
 
@@ -761,7 +760,7 @@ const tenantMemory = createMongoDBMemory({
     vectorIndexNames: { semantic: 'facts_vs' },
     disable: ['scratchpad', 'procedural'],                          // tiers this product doesn't use
     // Add 'tenant_id' as an extra Vector Search filter field on the semantic and episodic tiers.
-    extraFilterFields: /*▶*/{ semantic: ['tenant_id'], episodic: ['tenant_id'] }/*◀*/,
+    extraFilterFields: /*▶*/{ semantic: ['tenant_id'], episodic: ['tenant_id'] }/*◀*/
   },
 })
 await tenantMemory.connect()
@@ -812,7 +811,7 @@ for (const [label, db] of [['voyage-4-lite', DB_NAME], ['voyage-4-large', DB_NAM
 | What we hit | What fixed it |
 |---|---|
 | Agent forgets everything between \`generate()\` calls | \`createMongoDBMemory()\` + \`tools: mongodbMemory({ userId, sessionId })\` |
-| Facts must survive across sessions | **Semantic** memory, scoped to the user, retrieved with Atlas Vector Search |
+| Facts must survive across sessions | **Semantic** memory, scoped to the user, retrieved with MongoDB Vector Search |
 | LLM sometimes skipped saving the transcript | **Mode B**: \`loadSession()\` before the call, \`onEnd: mongodbMemory.onFinish({ userId, sessionId, prompt })\`, \`hideToolCommands: ['session']\` |
 | "What have I done before?" | **Episodic** memory with usage stats |
 | Temporary notes that might matter later | **Scratchpad** → \`scratchpadPromote\` |
