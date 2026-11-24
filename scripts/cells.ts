@@ -24,7 +24,7 @@ the MongoDB memory provider referenced in the
 |---|---|
 | **Runtime** | Deno (this notebook runs on the Deno Jupyter kernel) |
 | **Agent framework** | \`ai\` v7 — \`ToolLoopAgent\`, \`isLoopFinished\` |
-| **Models** | Chat: **Gemini 3.5 Flash Lite** — Embeddings: **Voyage AI 4 Lite** — both through **Vercel AI Gateway**, one string each to swap |
+| **Models** | Chat: **Gemini**, **Claude on Amazon Bedrock** or **GPT on Azure OpenAI** — you pick the provider in one line — Embeddings: **Voyage AI 4 Lite** |
 | **Memory** | MongoDB Atlas (a local Atlas deployment for the lab, Atlas in the cloud when you ship) — 5 memory tiers, MongoDB Vector Search, TTL retention |
 
 ### What you'll learn
@@ -36,13 +36,14 @@ the MongoDB memory provider referenced in the
 6. Retention policies, retrieval filtering, multi-tenancy, and swapping models/embedders with zero code churn
 
 ### Prerequisites
-- **In the hosted lab:** nothing — a local Atlas deployment (with MongoDB Vector Search) is running on this machine and \`MONGODB_URI\` / \`AI_GATEWAY_API_KEY\` are already set in \`/etc/lab-env\`.
-- **On your laptop:** a local Atlas deployment (\`atlas deployments setup --type local\`) or any Atlas cluster, a Vercel AI Gateway API key, and a \`.env\` file (copy \`.env.example\`) with \`MONGODB_URI\` and \`AI_GATEWAY_API_KEY\`.
-- **For Part 7:** a free [Vercel](https://vercel.com/signup) account.
+- **In the hosted lab:** nothing — a local Atlas deployment (with MongoDB Vector Search) is running on this machine, and
+  \`MONGODB_URI\` plus the model and Voyage AI keys are already in \`/etc/lab-env\` (from your workshop passkey).
+  If the first code cell says a key is missing, run \`lab-passkey\` in the Terminal, then restart the kernel.
+- **On your laptop:** a local Atlas deployment (\`atlas deployments setup --type local\`) or any Atlas cluster, and a
+  \`.env\` file (copy \`.env.example\`) with \`MONGODB_URI\`, \`VOYAGE_API_KEY\` and the key for the provider you pick.
+- **For Part 7:** a free [Vercel](https://vercel.com/signup) account with [AI Gateway](https://vercel.com/ai-gateway) enabled.
 
 The \`memory\` package creates every collection and Vector Search index for you.
-
-> ⚠️ **Cost note:** every LLM turn and every \`*_save\` / \`*_search\` embedding goes through AI Gateway. The whole lab costs well under a dollar with the default models.
 `),
 
   md(`
@@ -58,7 +59,11 @@ looking at what it writes, which is most of what you'll do in this lab.
 
   code(`
 import { load } from '@std/dotenv'
-import { ToolLoopAgent, embed, gateway, isLoopFinished, tool, type ModelMessage } from 'ai'
+import { ToolLoopAgent, embed, isLoopFinished, tool, type LanguageModel, type ModelMessage } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock'
+import { createAzure } from '@ai-sdk/azure'
+import { createVoyage } from 'voyage-ai-provider'
 import { z } from 'zod'
 import { MongoClient } from 'mongodb'
 import { createMongoDBMemory } from '@mongodb-developer/vercel-ai-memory'
@@ -67,16 +72,48 @@ import { createMongoDBMemory } from '@mongodb-developer/vercel-ai-memory'
 // Variables that are already set always win.
 for (const envPath of ['/etc/lab-env', '../.env', '.env']) await load({ envPath, export: true })
 
-const MONGODB_URI = Deno.env.get('MONGODB_URI')
-const AI_GATEWAY_API_KEY = Deno.env.get('AI_GATEWAY_API_KEY')
-if (!MONGODB_URI || !AI_GATEWAY_API_KEY) throw new Error('Set MONGODB_URI and AI_GATEWAY_API_KEY (copy .env.example → .env)')
+// ── Pick your model provider ────────────────────────────────────────────────
+//   'google'    → Gemini                          (GOOGLE_API_KEY)
+//   'aws'       → Claude on Amazon Bedrock         (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY)
+//   'microsoft' → GPT on Azure OpenAI              (AZURE_OPENAI_API_KEY)
+const LLM_PROVIDER = 'google' as 'google' | 'aws' | 'microsoft'
+
+function requireEnv(name: string): string {
+  const value = Deno.env.get(name)
+  if (!value) throw new Error(\`\${name} is not set. Hosted lab: run lab-passkey in the Terminal, then restart the kernel. Laptop: add it to .env.\`)
+  return value
+}
+
+const MONGODB_URI = requireEnv('MONGODB_URI')
 
 // ── Models ───────────────────────────────────────────────────────────────────
-// Both go through Vercel AI Gateway: a model is just a 'provider/model' string.
-const CHAT_MODEL = Deno.env.get('CHAT_MODEL') ?? 'google/gemini-3.5-flash-lite'
-// Voyage AI 4 Lite — MongoDB's embedding models.
-const EMBED_MODEL = 'voyage/voyage-4-lite'
-const embedder = gateway.embeddingModel(EMBED_MODEL)
+// Every provider package returns the same AI SDK LanguageModel, so nothing below this cell knows which one you picked.
+function chatModel(provider: typeof LLM_PROVIDER): LanguageModel {
+  switch (provider) {
+    case 'google':
+      return createGoogleGenerativeAI({ apiKey: requireEnv('GOOGLE_API_KEY') })('gemini-3.5-flash-lite')
+    case 'aws':
+      return createAmazonBedrock({
+        region: 'us-west-2',
+        accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
+      })('global.anthropic.claude-sonnet-4-6')
+    case 'microsoft':
+      // The model id is the Azure deployment name.
+      return createAzure({ resourceName: 'gai-326', apiKey: requireEnv('AZURE_OPENAI_API_KEY') })('gpt-5.1')
+  }
+}
+const CHAT_MODEL = chatModel(LLM_PROVIDER)
+
+// Voyage AI 4 Lite — MongoDB's embedding models. Keys from MongoDB Atlas ("al-…") use the Atlas endpoint;
+// keys from the Voyage AI dashboard use Voyage's own.
+const VOYAGE_API_KEY = requireEnv('VOYAGE_API_KEY')
+const voyage = createVoyage({
+  apiKey: VOYAGE_API_KEY,
+  baseURL: VOYAGE_API_KEY.startsWith('al-') ? 'https://ai.mongodb.com/v1' : undefined,
+})
+const EMBED_MODEL = 'voyage-4-lite'
+const embedder = voyage.embeddingModel(EMBED_MODEL)
 
 // Everything this lab writes goes into this database so cleanup is one call.
 const DB_NAME = 'trailhead_lab'
@@ -87,7 +124,8 @@ const labDb = mongo.db(DB_NAME)
 // Check the connection: run the \`ping\` command against the \`admin\` database.
 await mongo.db('admin').command({ ping: 1 })
 
-console.log('✅ MongoDB reachable — chat:', CHAT_MODEL, '| embeddings:', EMBED_MODEL, '| db:', DB_NAME)
+// deno-lint-ignore no-explicit-any
+console.log('✅ MongoDB reachable — chat:', LLM_PROVIDER, (CHAT_MODEL as any).modelId, '| embeddings:', EMBED_MODEL, '| db:', DB_NAME)
 `),
 
   md(`
@@ -185,7 +223,7 @@ only sees \`instructions\` + the current prompt. Prove it by swapping the model 
 
   code(`
 const trailheadOtherModel = new ToolLoopAgent({
-  model: 'openai/gpt-4o-mini',   // ← only this line changed: a different provider, same Gateway
+  model: chatModel(LLM_PROVIDER === 'google' ? 'aws' : 'google'),   // ← only this line changed: a different provider
   instructions: TRAILHEAD_INSTRUCTIONS,
   tools: { suggestTrail },
   stopWhen: isLoopFinished(),
@@ -230,10 +268,10 @@ Plus \`memory_forget\` for agent-driven deletion.
 ### 2.1 Create the memory instance
 
 \`createMongoDBMemory()\` is called **once** (module/server level). It needs a connection string and any
-AI SDK \`EmbeddingModel\` — here Voyage AI 4 Lite through Gateway. Vector dimensions are **probed automatically**
-from the embedder, so there's nothing to configure.
+AI SDK \`EmbeddingModel\` — here Voyage AI 4 Lite from the [Voyage AI provider](https://ai-sdk.dev/providers/community-providers/voyage-ai).
+Vector dimensions are **probed automatically** from the embedder, so there's nothing to configure.
 
-Connection is lazy (first tool use), but we call \`.connect()\` explicitly so the collections and Atlas Vector
+Connection is lazy (first tool use), but we call \`.connect()\` explicitly so the collections and MongoDB Vector
 Search indexes get created now and we can look at them.
 `),
 
@@ -789,7 +827,7 @@ re-embed what you want to keep.
   code(`
 const voyageLargeMemory = createMongoDBMemory({
   uri: MONGODB_URI,
-  embedder: gateway.embeddingModel('voyage/voyage-4-large'),   // ← the only line that changed
+  embedder: voyage.embeddingModel('voyage-4-large'),   // ← the only line that changed
   topology: { dbName: DB_NAME + '_voyage_large' },
 })
 await voyageLargeMemory.connect()
@@ -819,14 +857,14 @@ for (const [label, db] of [['voyage-4-lite', DB_NAME], ['voyage-4-large', DB_NAM
 | "Forget that" | \`memory_forget\` → \`expire_at\` TTL |
 | Storage grows forever / trivia pollutes recall | \`retention\` policies (\`ttl+importance\`, \`dynamic\`) + \`filtering.minImportance\` |
 | Multiple orgs, one cluster | \`topology.extraFilterFields\`, custom collection names, \`disable\` |
-| Vendor lock-in | Any chat model through **Vercel AI Gateway**, and any Voyage AI embedding model — one string to swap |
+| Vendor lock-in | Any AI SDK chat provider (Gemini, Bedrock, Azure OpenAI, or Vercel AI Gateway in production), and any Voyage AI embedding model — one line to swap |
 
 ### Take it further
 
 1. **Make the UI yours** — the app you deploy in Part 7 lives in \`deploy/\`: restyle the memory cards in \`components/memory-tool.tsx\`, or show procedural memories in the side panel.
 2. **Tenant filter end-to-end** — write \`tenant_id\` on save and filter on search using \`extraFilterFields\`.
-3. **Different chat model** — set \`CHAT_MODEL = 'openai/gpt-4o-mini'\` or \`'mistral/mistral-small'\` and re-run Part 3. Does memory behaviour change?
-4. **Observability** — open the Vercel AI Gateway dashboard and look at the per-request logs for this lab: how many embedding calls did one Trailhead turn cost?
+3. **Different chat model** — change \`LLM_PROVIDER\` in the first code cell (\`'google'\`, \`'aws'\` or \`'microsoft'\`), re-run it, then re-run Part 3. Same memory, different model: does its behaviour change?
+4. **Observability** — after Part 7, open the AI Gateway tab of your Vercel dashboard and look at the per-request logs for your deployed agent: how many embedding calls did one Trailhead turn cost?
 5. **Custom tool comparison** — read the AI SDK's [Build a Custom Memory Tool](https://ai-sdk.dev/cookbook/guides/custom-memory-tool) recipe and compare the effort with what you did here.
 
 ### Cleanup (optional)
@@ -876,8 +914,10 @@ The next cell runs \`deploy/deploy.sh\`, which does:
 | 3 | \`vercel integration add mongodbatlas --plan FREE -m clusterTier=FREE -m vercelRegion=iad1\` | Creates a free **M0** cluster through the Vercel Marketplace and injects **\`MONGODB_URI\`** into the project |
 | 4 | \`vercel deploy --prod --yes\` | Builds and deploys the Next.js app in \`deploy/\` |
 
-The script also copies your \`AI_GATEWAY_API_KEY\` (already set in the lab) to the Vercel project, so the chat model and
-the Voyage embeddings work in production. Without a key it falls back to Vercel's automatic OIDC auth.
+In production the app reaches its chat model and Voyage embeddings through **Vercel AI Gateway**, authenticated by
+Vercel's automatic OIDC token: no API key is copied anywhere, and usage is billed to your own Vercel team.
+**Enable AI Gateway on your Vercel team first** (Vercel dashboard → **AI Gateway** → enable; new teams get free
+monthly credits), or the deployed agent's first request fails.
 
 > **Do these once in the Terminal first.** A notebook cell has no keyboard, so the script runs in
 > \`--non-interactive\` mode and **stops with a hint** instead of prompting:

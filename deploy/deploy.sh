@@ -5,8 +5,8 @@
 #   PROJECT=my-trailhead REGION=iad1 ./deploy/deploy.sh
 #   VERCEL_SCOPE=my-team ./deploy/deploy.sh   # required when your login belongs to more than one team
 #
-# Requires: Node 18+, `vercel login` done once. Models go through AI Gateway: if
-# AI_GATEWAY_API_KEY is set in the environment it is copied to the project, otherwise Vercel OIDC is used.
+# Requires: Node 18+, `vercel login` done once, and AI Gateway enabled on your Vercel team: the deployed
+# app's models go through AI Gateway with the project's OIDC token (no API key is uploaded).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,32 +95,9 @@ else
   fi
 fi
 
-# AI Gateway: plant the key on the project when we have one (the lab's /etc/lab-env or your .env). Without it the
-# function falls back to Vercel OIDC, which only works if the team has AI Gateway access/credits.
-# A terminal opened before `set-gateway-key` ran never loaded the key, so read the env files ourselves.
-if [[ -z "${AI_GATEWAY_API_KEY:-}" ]]; then
-  for f in /etc/lab-env "$HERE/../.env"; do
-    if [[ -f $f ]]; then
-      KEY_LINE="$(grep -E '^AI_GATEWAY_API_KEY=' "$f" | tail -n1 || true)"
-      [[ -n "$KEY_LINE" ]] && { AI_GATEWAY_API_KEY="$(sed -E 's/^AI_GATEWAY_API_KEY=//; s/^"(.*)"$/\1/' <<<"$KEY_LINE")"; break; }
-    fi
-  done
-fi
-step "Setting AI_GATEWAY_API_KEY on the project"
-if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
-  # Sensitive variables can't target Development, and the deployed app only reads Production (and Preview).
-  for ENV_NAME in production preview; do
-    if ENV_OUT="$(printf '%s' "$AI_GATEWAY_API_KEY" | vc env add AI_GATEWAY_API_KEY "$ENV_NAME" --sensitive --force --yes 2>&1)"; then
-      echo "✓ AI_GATEWAY_API_KEY set for $ENV_NAME (…${AI_GATEWAY_API_KEY: -4})"
-    else
-      echo "$ENV_OUT"
-      if [[ $ENV_NAME == production ]]; then echo "✖ Could not set AI_GATEWAY_API_KEY on production (output above)."; exit 1; fi
-      echo "ℹ Skipped $ENV_NAME (output above); production is what the deployment uses."
-    fi
-  done
-else
-  echo "ℹ No AI_GATEWAY_API_KEY in the environment, /etc/lab-env or .env: relying on Vercel OIDC (needs AI Gateway enabled on your team)."
-fi
+# AI Gateway: no key is uploaded. The deployed functions authenticate with the project's Vercel OIDC token, so
+# usage lands on the deployer's own team, which must have AI Gateway enabled.
+echo "ℹ Models go through Vercel AI Gateway with this project's OIDC token: make sure AI Gateway is enabled on your Vercel team."
 
 step "4/4 Deploying to production"
 # Deploy a copy outside any git repo. Inside the lab clone the CLI attaches the lab's last commit, and Vercel blocks

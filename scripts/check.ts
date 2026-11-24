@@ -1,19 +1,47 @@
 // Smoke test: exercises the same code paths the notebook cells use.
 // Run:  deno task smoke
 import '@std/dotenv/load'
-import { ToolLoopAgent, gateway, isLoopFinished, tool } from 'ai'
+import { ToolLoopAgent, isLoopFinished, tool, type LanguageModel } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock'
+import { createAzure } from '@ai-sdk/azure'
+import { createVoyage } from 'voyage-ai-provider'
 import { z } from 'zod'
 import { MongoClient } from 'mongodb'
 import { createMongoDBMemory } from '@mongodb-developer/vercel-ai-memory'
 
-const MONGODB_URI = Deno.env.get('MONGODB_URI')
-const AI_GATEWAY_API_KEY = Deno.env.get('AI_GATEWAY_API_KEY')
-if (!MONGODB_URI || !AI_GATEWAY_API_KEY) {
-  throw new Error('Set MONGODB_URI and AI_GATEWAY_API_KEY in .env')
+function requireEnv(name: string): string {
+  const value = Deno.env.get(name)
+  if (!value) throw new Error(`Set ${name} in .env`)
+  return value
 }
 
-const CHAT_MODEL = 'openai/gpt-4o-mini'
-const EMBED_MODEL = 'voyage/voyage-4-lite'
+// Same provider switch as the notebook. Pick one with LLM_PROVIDER=google|aws|microsoft (default google).
+const LLM_PROVIDER = (Deno.env.get('LLM_PROVIDER') ?? 'google') as 'google' | 'aws' | 'microsoft'
+function chatModel(provider: typeof LLM_PROVIDER): LanguageModel {
+  switch (provider) {
+    case 'google':
+      return createGoogleGenerativeAI({ apiKey: requireEnv('GOOGLE_API_KEY') })('gemini-3.5-flash-lite')
+    case 'aws':
+      return createAmazonBedrock({
+        region: 'us-west-2',
+        accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
+      })('global.anthropic.claude-sonnet-4-6')
+    case 'microsoft':
+      return createAzure({ resourceName: 'gai-326', apiKey: requireEnv('AZURE_OPENAI_API_KEY') })('gpt-5.1')
+  }
+}
+
+const MONGODB_URI = requireEnv('MONGODB_URI')
+const VOYAGE_API_KEY = requireEnv('VOYAGE_API_KEY')
+const voyage = createVoyage({
+  apiKey: VOYAGE_API_KEY,
+  baseURL: VOYAGE_API_KEY.startsWith('al-') ? 'https://ai.mongodb.com/v1' : undefined,
+})
+
+const CHAT_MODEL = chatModel(LLM_PROVIDER)
+const EMBED_MODEL = 'voyage-4-lite'
 const DB_NAME = 'trailhead_smoke'
 
 // ── 1. Custom tool ───────────────────────────────────────────────────────────
@@ -43,10 +71,10 @@ const agentNoMemory = new ToolLoopAgent({
 const r0 = await agentNoMemory.generate({ prompt: 'Say hello in five words.' })
 console.log('[no-memory]', r0.text, '| steps:', r0.steps.length)
 
-// ── 3. Memory instance via Gateway + Voyage ──────────────────────────────────
+// ── 3. Memory instance with Voyage AI embeddings ─────────────────────────────
 const mongodbMemory = createMongoDBMemory({
   uri: MONGODB_URI,
-  embedder: gateway.embeddingModel(EMBED_MODEL),
+  embedder: voyage.embeddingModel(EMBED_MODEL),
   topology: { dbName: DB_NAME },
 })
 await mongodbMemory.connect()
@@ -80,7 +108,7 @@ console.log(
 // ── 6. Mode B agent (hook-driven session) ────────────────────────────────────
 const memB = createMongoDBMemory({
   uri: MONGODB_URI,
-  embedder: gateway.embeddingModel(EMBED_MODEL),
+  embedder: voyage.embeddingModel(EMBED_MODEL),
   topology: { dbName: DB_NAME, hideToolCommands: ['session'] },
 })
 const agentB = new ToolLoopAgent({
@@ -104,7 +132,7 @@ const scope = { userId: 'bob', sessionId: 'sB' }
 await agentB.generate({ prompt: 'x', options: { ...scope, prompt: 'My name is Bob. Reply with OK only.' } })
 const rB = await agentB.generate({ prompt: 'x', options: { ...scope, prompt: 'What is my name? One word.' } })
 console.log('[modeB]', rB.text)
-const sess = await memB.store.sessionRecent('sB', 20)
+const sess = await memB.store.sessionRecent(scope.userId, scope.sessionId, 20)
 console.log('[modeB] session docs:', sess.map((d) => `${d.seq}:${d.role}`))
 
 // ── 7. Inspect Atlas + cleanup ───────────────────────────────────────────────

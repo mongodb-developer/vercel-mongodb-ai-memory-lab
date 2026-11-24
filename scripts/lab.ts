@@ -4,7 +4,11 @@
 
 // ══════════ cell 1 ══════════
 import { load } from '@std/dotenv'
-import { ToolLoopAgent, embed, gateway, isLoopFinished, tool, type ModelMessage } from 'ai'
+import { ToolLoopAgent, embed, isLoopFinished, tool, type LanguageModel, type ModelMessage } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock'
+import { createAzure } from '@ai-sdk/azure'
+import { createVoyage } from 'voyage-ai-provider'
 import { z } from 'zod'
 import { MongoClient } from 'mongodb'
 import { createMongoDBMemory } from '@mongodb-developer/vercel-ai-memory'
@@ -13,16 +17,48 @@ import { createMongoDBMemory } from '@mongodb-developer/vercel-ai-memory'
 // Variables that are already set always win.
 for (const envPath of ['/etc/lab-env', '../.env', '.env']) await load({ envPath, export: true })
 
-const MONGODB_URI = Deno.env.get('MONGODB_URI')
-const AI_GATEWAY_API_KEY = Deno.env.get('AI_GATEWAY_API_KEY')
-if (!MONGODB_URI || !AI_GATEWAY_API_KEY) throw new Error('Set MONGODB_URI and AI_GATEWAY_API_KEY (copy .env.example → .env)')
+// ── Pick your model provider ────────────────────────────────────────────────
+//   'google'    → Gemini                          (GOOGLE_API_KEY)
+//   'aws'       → Claude on Amazon Bedrock         (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY)
+//   'microsoft' → GPT on Azure OpenAI              (AZURE_OPENAI_API_KEY)
+const LLM_PROVIDER = 'google' as 'google' | 'aws' | 'microsoft'
+
+function requireEnv(name: string): string {
+  const value = Deno.env.get(name)
+  if (!value) throw new Error(`${name} is not set. Hosted lab: run lab-passkey in the Terminal, then restart the kernel. Laptop: add it to .env.`)
+  return value
+}
+
+const MONGODB_URI = requireEnv('MONGODB_URI')
 
 // ── Models ───────────────────────────────────────────────────────────────────
-// Both go through Vercel AI Gateway: a model is just a 'provider/model' string.
-const CHAT_MODEL = Deno.env.get('CHAT_MODEL') ?? 'google/gemini-3.5-flash-lite'
-// Voyage AI 4 Lite — MongoDB's embedding models.
-const EMBED_MODEL = 'voyage/voyage-4-lite'
-const embedder = gateway.embeddingModel(EMBED_MODEL)
+// Every provider package returns the same AI SDK LanguageModel, so nothing below this cell knows which one you picked.
+function chatModel(provider: typeof LLM_PROVIDER): LanguageModel {
+  switch (provider) {
+    case 'google':
+      return createGoogleGenerativeAI({ apiKey: requireEnv('GOOGLE_API_KEY') })('gemini-3.5-flash-lite')
+    case 'aws':
+      return createAmazonBedrock({
+        region: 'us-west-2',
+        accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
+      })('global.anthropic.claude-sonnet-4-6')
+    case 'microsoft':
+      // The model id is the Azure deployment name.
+      return createAzure({ resourceName: 'gai-326', apiKey: requireEnv('AZURE_OPENAI_API_KEY') })('gpt-5.1')
+  }
+}
+const CHAT_MODEL = chatModel(LLM_PROVIDER)
+
+// Voyage AI 4 Lite — MongoDB's embedding models. Keys from MongoDB Atlas ("al-…") use the Atlas endpoint;
+// keys from the Voyage AI dashboard use Voyage's own.
+const VOYAGE_API_KEY = requireEnv('VOYAGE_API_KEY')
+const voyage = createVoyage({
+  apiKey: VOYAGE_API_KEY,
+  baseURL: VOYAGE_API_KEY.startsWith('al-') ? 'https://ai.mongodb.com/v1' : undefined,
+})
+const EMBED_MODEL = 'voyage-4-lite'
+const embedder = voyage.embeddingModel(EMBED_MODEL)
 
 // Everything this lab writes goes into this database so cleanup is one call.
 const DB_NAME = 'trailhead_lab'
@@ -33,7 +69,8 @@ const labDb = mongo.db(DB_NAME)
 // Check the connection: run the `ping` command against the `admin` database.
 await mongo.db('admin').command({ ping: 1 })
 
-console.log('✅ MongoDB reachable — chat:', CHAT_MODEL, '| embeddings:', EMBED_MODEL, '| db:', DB_NAME)
+// deno-lint-ignore no-explicit-any
+console.log('✅ MongoDB reachable — chat:', LLM_PROVIDER, (CHAT_MODEL as any).modelId, '| embeddings:', EMBED_MODEL, '| db:', DB_NAME)
 
 // ══════════ cell 2 ══════════
 const TRAILS = [
@@ -95,7 +132,7 @@ await chat(trailhead, 'Great — can you suggest a trail for me this weekend?')
 
 // ══════════ cell 6 ══════════
 const trailheadOtherModel = new ToolLoopAgent({
-  model: 'openai/gpt-4o-mini',   // ← only this line changed: a different provider, same Gateway
+  model: chatModel(LLM_PROVIDER === 'google' ? 'aws' : 'google'),   // ← only this line changed: a different provider
   instructions: TRAILHEAD_INSTRUCTIONS,
   tools: { suggestTrail },
   stopWhen: isLoopFinished(),
@@ -401,7 +438,7 @@ console.log('vector index fields:', JSON.stringify(idx[0]?.latestDefinition?.fie
 // ══════════ cell 30 ══════════
 const voyageLargeMemory = createMongoDBMemory({
   uri: MONGODB_URI,
-  embedder: gateway.embeddingModel('voyage/voyage-4-large'),   // ← the only line that changed
+  embedder: voyage.embeddingModel('voyage-4-large'),   // ← the only line that changed
   topology: { dbName: DB_NAME + '_voyage_large' },
 })
 await voyageLargeMemory.connect()

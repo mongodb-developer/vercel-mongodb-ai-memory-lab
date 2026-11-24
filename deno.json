@@ -1,7 +1,11 @@
 {
   "nodeModulesDir": "auto",
   "imports": {
-    "ai": "npm:ai@^7.0.0",
+    "ai": "npm:ai@^7.0.179",
+    "@ai-sdk/google": "npm:@ai-sdk/google@^4.0.0",
+    "@ai-sdk/amazon-bedrock": "npm:@ai-sdk/amazon-bedrock@^5.0.0",
+    "@ai-sdk/azure": "npm:@ai-sdk/azure@^4.0.0",
+    "voyage-ai-provider": "npm:voyage-ai-provider@^5.0.0",
     "zod": "npm:zod@^3.25.76",
     "mongodb": "npm:mongodb@^6.0.0",
     "@mongodb-developer/vercel-ai-memory": "npm:@mongodb-developer/vercel-ai-memory@^1.0.0",

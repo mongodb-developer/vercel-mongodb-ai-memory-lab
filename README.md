@@ -26,10 +26,11 @@ Wrap an answer in `/*▶*/ … /*◀*/` to make it a blank.
 ## Run it on your laptop
 
 Requirements: [Deno](https://deno.com) 2.x, VS Code with the Jupyter extension, a local Atlas deployment
-(`atlas deployments setup --type local`) or any Atlas cluster, and a Vercel AI Gateway key.
+(`atlas deployments setup --type local`) or any Atlas cluster, a Voyage AI key, and a key for one chat provider
+(Google Gemini, Amazon Bedrock or Azure OpenAI).
 
 ```bash
-cp .env.example .env        # fill in MONGODB_URI and AI_GATEWAY_API_KEY
+cp .env.example .env        # fill in MONGODB_URI, VOYAGE_API_KEY and your provider's key
 deno task kernel            # registers the Deno Jupyter kernel
 code labs/vercel-mongodb-ai-memory-lab.ipynb
 ```
@@ -39,12 +40,24 @@ code labs/vercel-mongodb-ai-memory-lab.ipynb
 ```bash
 deno task build    # regenerate notebooks, scripts/lab.ts and answer sheets
 deno task check    # type-check the solution
-deno task lab      # run the whole solution headless (needs MONGODB_URI + AI_GATEWAY_API_KEY)
+deno task smoke    # quick end-to-end check (LLM_PROVIDER=google|aws|microsoft, default google)
+deno task lab      # run the whole solution headless (needs the same .env as the notebook)
 ```
 
 `deno task build --track=<path>` also syncs the answer sheets into an Instruqt track's `assignment.md` files.
 
 ## Models
 
-AI SDK v7. Chat: `google/gemini-3.5-flash-lite`; embeddings: Voyage AI `voyage/voyage-4-lite` — both through Vercel AI Gateway.
-Use a Gateway key with paid credits: free-tier keys are limited to 5 requests per minute per model.
+AI SDK v7. The notebook's first code cell sets `LLM_PROVIDER`:
+
+| `LLM_PROVIDER` | Package | Model | Keys |
+|---|---|---|---|
+| `google` (default) | `@ai-sdk/google` | `gemini-3.5-flash-lite` | `GOOGLE_API_KEY` |
+| `aws` | `@ai-sdk/amazon-bedrock` | `global.anthropic.claude-sonnet-4-6` (us-west-2) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `microsoft` | `@ai-sdk/azure` | deployment `gpt-5.1` on `gai-326` | `AZURE_OPENAI_API_KEY` |
+
+Embeddings: `voyage-4-lite` through the [Voyage AI provider](https://ai-sdk.dev/providers/community-providers/voyage-ai).
+An Atlas AI Model key (`al-…`) is sent to `https://ai.mongodb.com/v1`; a Voyage AI dashboard key to Voyage's own API.
+
+In the hosted lab, all of these come from the workshop passkey (`lab-passkey`). The deployed app in `deploy/` uses
+Vercel AI Gateway with OIDC instead, so no lab key is ever copied to Vercel.
